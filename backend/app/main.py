@@ -11,8 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import engine, Base, SessionLocal
-from app.routers import health
-from app.routers import policy, products, audit
+from app.routers import health, policy, products, audit, agent
 
 
 @asynccontextmanager
@@ -56,8 +55,8 @@ app.include_router(health.router, prefix="/api")
 app.include_router(policy.router, prefix="/api")
 app.include_router(products.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
+app.include_router(agent.router, prefix="/api/agent")
 
-# Phase 3 routers (added in next phase):
-# app.include_router(agent.router, prefix="/api")
+# Phase 4 router (added in next phase):
 # app.include_router(payments.router, prefix="/api")
 

@@ -20,6 +20,7 @@ export interface Policy {
   approved_merchant_ids: string[];
   require_approval: boolean;
   successful_spend_cents: number;
+  remaining_budget_cents: number;
   created_at: string;
   updated_at: string;
 }

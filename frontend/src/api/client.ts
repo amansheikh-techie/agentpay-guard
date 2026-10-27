@@ -1,7 +1,7 @@
 // api/client.ts — Typed API fetchers for backend endpoints
 // Never puts secrets in requests; all auth stays on the backend.
 
-import type { HealthStatus } from '../types';
+import type { HealthStatus, Policy, Product, Proposal, AuditEvent } from '../types';
 
 const BASE = '/api'; // proxied to http://localhost:8000 by Vite dev server
 
@@ -15,7 +15,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     let message = `Request failed: ${res.status} ${res.statusText}`;
     try {
       const body = await res.json();
-      // Never leak stack traces or internal error details
       message = body?.detail ?? body?.message ?? message;
     } catch {
       // ignore parse errors
@@ -29,33 +28,38 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 // ── Health ────────────────────────────────────────────────────────────────────
 export const fetchHealth = (): Promise<HealthStatus> => request<HealthStatus>('/health');
 
-// ── Policy (Phase 2) ─────────────────────────────────────────────────────────
-// export const fetchPolicy = () => request<Policy>('/policy');
-// export const updatePolicy = (body: Partial<Policy>) =>
-//   request<Policy>('/policy', { method: 'PUT', body: JSON.stringify(body) });
+// ── Policy ───────────────────────────────────────────────────────────────────
+export const fetchPolicy = (): Promise<Policy> => request<Policy>('/policy');
 
-// ── Products (Phase 2) ───────────────────────────────────────────────────────
-// export const fetchProducts = () => request<Product[]>('/products');
+export const updatePolicy = (body: Partial<Policy>): Promise<Policy> =>
+  request<Policy>('/policy', { method: 'PUT', body: JSON.stringify(body) });
 
-// ── Agent propose (Phase 3) ──────────────────────────────────────────────────
-// export const propose = (userRequest: string) =>
-//   request<Proposal>('/agent/propose', {
-//     method: 'POST',
-//     body: JSON.stringify({ user_request: userRequest }),
-//   });
+// ── Products ─────────────────────────────────────────────────────────────────
+export const fetchProducts = (): Promise<Product[]> => request<Product[]>('/products');
+
+// ── Agent propose ────────────────────────────────────────────────────────────
+export const propose = (userRequest: string): Promise<Proposal> =>
+  request<Proposal>('/agent/propose', {
+    method: 'POST',
+    body: JSON.stringify({ user_request: userRequest }),
+  });
+
+// ── Audit ────────────────────────────────────────────────────────────────────
+export const fetchAudit = (limit = 20): Promise<AuditEvent[]> =>
+  request<AuditEvent[]>(`/audit?limit=${limit}`);
 
 // ── Payments (Phase 4) ───────────────────────────────────────────────────────
-// export const createOrder = (proposalId: string) =>
-//   request<{ paypal_order_id: string }>('/payments/create-order', {
-//     method: 'POST',
-//     body: JSON.stringify({ proposal_id: proposalId }),
-//   });
+export const createOrder = (proposalId: string) =>
+  request<{ payment_id: string; paypal_order_id: string; approve_url: string; status: string }>(
+    '/payments/create-order',
+    {
+      method: 'POST',
+      body: JSON.stringify({ proposal_id: proposalId, user_approved: true }),
+    }
+  );
 
-// export const captureOrder = (paypalOrderId: string) =>
-//   request<Payment>('/payments/capture-order', {
-//     method: 'POST',
-//     body: JSON.stringify({ paypal_order_id: paypalOrderId }),
-//   });
-
-// ── Audit (Phase 2) ──────────────────────────────────────────────────────────
-// export const fetchAudit = () => request<AuditEvent[]>('/audit');
+export const captureOrder = (paypalOrderId: string) =>
+  request<{ status: string; payment_id: string }>('/payments/capture-order', {
+    method: 'POST',
+    body: JSON.stringify({ paypal_order_id: paypalOrderId }),
+  });

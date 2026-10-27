@@ -75,7 +75,15 @@ class ProductRead(BaseModel):
 # ── Proposal ──────────────────────────────────────────────────────────────────
 
 class ProposeRequest(BaseModel):
-    user_request: str = Field(..., min_length=3, max_length=1000)
+    user_request: str = Field(..., max_length=1000)
+
+    @field_validator("user_request")
+    @classmethod
+    def validate_user_request(cls, v: str) -> str:
+        stripped = v.strip()
+        if len(stripped) < 3:
+            raise ValueError("user_request must contain at least 3 non-whitespace characters")
+        return stripped
 
 
 class ProposalRead(BaseModel):
