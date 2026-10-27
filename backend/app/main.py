@@ -10,14 +10,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
 from app.routers import health
+from app.routers import policy, products, audit
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create all tables on startup (no-op if they already exist)
     Base.metadata.create_all(bind=engine)
+    # Seed demo catalogue and default policy if empty
+    from app.seed import seed_if_empty
+    db = SessionLocal()
+    try:
+        seed_if_empty(db)
+    finally:
+        db.close()
     yield
 
 
@@ -45,10 +53,11 @@ app.add_middleware(
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(health.router, prefix="/api")
+app.include_router(policy.router, prefix="/api")
+app.include_router(products.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
 
-# Additional routers will be added in later phases:
-# app.include_router(policy.router, prefix="/api")
-# app.include_router(products.router, prefix="/api")
+# Phase 3 routers (added in next phase):
 # app.include_router(agent.router, prefix="/api")
 # app.include_router(payments.router, prefix="/api")
-# app.include_router(audit.router, prefix="/api")
+
