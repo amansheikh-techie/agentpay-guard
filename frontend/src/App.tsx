@@ -61,6 +61,12 @@ export default function App() {
     loadAudit();
   };
 
+  // Handler when payment capture succeeds
+  const handlePaymentSuccess = () => {
+    loadPolicy();
+    loadAudit();
+  };
+
   return (
     <div className="app-wrapper">
       <Header />
@@ -78,7 +84,10 @@ export default function App() {
 
         {/* Right column: active proposal / policy decision card + immutable audit log */}
         <div className="col-right">
-          <DecisionCard proposal={activeProposal} />
+          <DecisionCard
+            proposal={activeProposal}
+            onPaymentSuccess={handlePaymentSuccess}
+          />
           <AuditLog
             events={auditEvents}
             loading={auditLoading}

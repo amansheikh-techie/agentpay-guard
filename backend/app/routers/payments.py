@@ -1,0 +1,342 @@
+"""
+routers/payments.py — PayPal Sandbox Orders v2 endpoints.
+
+Endpoints:
+  POST /api/payments/create-order
+  POST /api/payments/capture-order
+  POST /api/payments/cancel
+  GET  /api/payments/{payment_id}
+
+Security Rules:
+  1. Orders can ONLY be created for existing ALLOWED proposals.
+  2. Requires explicit user approval signal (user_approved=True).
+  3. Re-evaluates spending policy immediately before order creation to prevent stale approvals.
+  4. Authoritative amount and currency are read exclusively from SQLite, never from client requests.
+  5. Captures are verified with PayPal's response before marking payment captured.
+  6. Idempotent: repeated capture calls do not duplicate budget deductions.
+  7. Cancelled/failed orders never increment successful_spend_cents.
+"""
+from __future__ import annotations
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.config import get_settings
+from app.database import get_db
+from app.models import Policy, Product, Proposal, Payment
+from app.schemas import (
+    CreateOrderRequest,
+    CreateOrderResponse,
+    CaptureOrderRequest,
+    CancelOrderRequest,
+    PaymentRead,
+)
+from app.services import paypal_service, audit_service
+from app.services.paypal_service import PayPalError
+from app.services.policy_engine import (
+    PolicySnapshot,
+    ProductSnapshot,
+    evaluate,
+)
+
+router = APIRouter()
+
+
+@router.post("/create-order", response_model=CreateOrderResponse, status_code=status.HTTP_201_CREATED)
+def create_payment_order(
+    payload: CreateOrderRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Creates a PayPal Sandbox order after re-validating spending policy and explicit user approval.
+    """
+    settings = get_settings()
+
+    # 1. Fetch Proposal
+    proposal = db.query(Proposal).filter(Proposal.id == payload.proposal_id).first()
+    if not proposal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Proposal '{payload.proposal_id}' was not found.",
+        )
+
+    # 2. Strict policy check: Cannot create payment for blocked proposal
+    if proposal.policy_decision != "ALLOWED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot create a payment order for a BLOCKED purchase proposal.",
+        )
+
+    # 3. Resolve authoritative product
+    product = db.query(Product).filter(Product.id == proposal.selected_product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Product associated with proposal no longer exists in catalogue.",
+        )
+
+    # 4. Fetch current policy and perform real-time live re-evaluation
+    policy = db.query(Policy).first()
+    if not policy:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Spending policy is not configured.",
+        )
+
+    policy_snap = PolicySnapshot(
+        total_budget_cents=policy.total_budget_cents,
+        max_per_order_cents=policy.max_per_order_cents,
+        currency=policy.currency,
+        approved_merchant_ids=policy.approved_merchant_ids,
+        require_approval=policy.require_approval,
+        successful_spend_cents=policy.successful_spend_cents,
+    )
+    product_snap = ProductSnapshot(
+        id=product.id,
+        price_cents=product.price_cents,
+        currency=product.currency,
+        merchant_id=product.merchant_id,
+    )
+
+    recheck_result = evaluate(policy_snap, product_snap, human_approved=payload.user_approved)
+    if not recheck_result.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Live policy re-evaluation blocked checkout: {', '.join(recheck_result.explanations)}",
+        )
+
+    # 5. Check PayPal configuration
+    if not settings.paypal_configured:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "PayPal Sandbox credentials are not configured in backend/.env. "
+                "Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET to enable live Sandbox checkout."
+            ),
+        )
+
+    # 6. Generate payment ID and create PayPal Sandbox order
+    payment_id = f"pay_{uuid.uuid4().hex[:12]}"
+    return_url = f"{settings.frontend_origin}?payment_status=approved&payment_id={payment_id}"
+    cancel_url = f"{settings.frontend_origin}?payment_status=cancelled&payment_id={payment_id}"
+
+    try:
+        order_data = paypal_service.create_order(
+            amount_cents=product.price_cents,
+            currency=product.currency,
+            reference_id=payment_id,
+            description=product.name,
+            return_url=return_url,
+            cancel_url=cancel_url,
+            request_id=payment_id,
+        )
+    except PayPalError as err:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"PayPal Sandbox error: {err.message}",
+        )
+
+    paypal_order_id = order_data["id"]
+    approve_url = next(
+        (link["href"] for link in order_data.get("links", []) if link.get("rel") == "approve"),
+        "",
+    )
+
+    # 7. Record Payment
+    payment = Payment(
+        id=payment_id,
+        proposal_id=proposal.id,
+        paypal_order_id=paypal_order_id,
+        amount_cents=product.price_cents,
+        currency=product.currency,
+        status="pending",
+    )
+    db.add(payment)
+    proposal.status = "approved"
+    db.commit()
+
+    # 8. Audit log
+    audit_service.log(
+        db=db,
+        event_type="PAYMENT_CREATED",
+        details={
+            "paypal_order_id": paypal_order_id,
+            "amount_cents": product.price_cents,
+            "currency": product.currency,
+            "product_id": product.id,
+            "product_name": product.name,
+            "user_approved": True,
+        },
+        proposal_id=proposal.id,
+        payment_id=payment_id,
+    )
+
+    return CreateOrderResponse(
+        payment_id=payment_id,
+        paypal_order_id=paypal_order_id,
+        approve_url=approve_url,
+        status="pending",
+    )
+
+
+@router.post("/capture-order", response_model=PaymentRead)
+def capture_payment_order(
+    payload: CaptureOrderRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Captures an approved PayPal order and updates the spending policy budget on verified completion.
+    Idempotent: Duplicate calls for an already-captured order do not duplicate budget deductions.
+    """
+    # 1. Fetch Payment record
+    payment = db.query(Payment).filter(Payment.paypal_order_id == payload.paypal_order_id).first()
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment for PayPal order '{payload.paypal_order_id}' was not found.",
+        )
+
+    # 2. Idempotency protection: If already captured, return existing state without deducting again
+    if payment.status == "captured":
+        return payment
+
+    # 3. Call PayPal Capture API
+    try:
+        capture_data = paypal_service.capture_order(payload.paypal_order_id)
+    except PayPalError as err:
+        payment.status = "failed"
+        db.commit()
+        audit_service.log(
+            db=db,
+            event_type="PAYMENT_FAILED",
+            details={"error": err.message, "paypal_order_id": payload.paypal_order_id},
+            proposal_id=payment.proposal_id,
+            payment_id=payment.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"PayPal capture failed: {err.message}",
+        )
+
+    # 4. Verify PayPal capture status
+    paypal_status = capture_data.get("status")
+    if paypal_status != "COMPLETED":
+        payment.status = "needs_verification"
+        db.commit()
+        audit_service.log(
+            db=db,
+            event_type="PAYMENT_NEEDS_VERIFICATION",
+            details={"status": paypal_status, "paypal_order_id": payload.paypal_order_id},
+            proposal_id=payment.proposal_id,
+            payment_id=payment.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"PayPal payment is not completed. Current status: {paypal_status}",
+        )
+
+    # 5. Extract capture ID and verify amount
+    purchase_units = capture_data.get("purchase_units", [])
+    captures = purchase_units[0].get("payments", {}).get("captures", []) if purchase_units else []
+    if not captures:
+        payment.status = "needs_verification"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No capture details returned from PayPal.",
+        )
+
+    capture_record = captures[0]
+    capture_id = capture_record.get("id")
+    amount_str = capture_record.get("amount", {}).get("value", "0")
+    currency = capture_record.get("amount", {}).get("currency_code", "")
+
+    expected_str = f"{payment.amount_cents / 100:.2f}"
+    if amount_str != expected_str or currency.upper() != payment.currency.upper():
+        payment.status = "needs_verification"
+        db.commit()
+        audit_service.log(
+            db=db,
+            event_type="PAYMENT_MISMATCH",
+            details={
+                "expected_amount": expected_str,
+                "captured_amount": amount_str,
+                "expected_currency": payment.currency,
+                "captured_currency": currency,
+            },
+            proposal_id=payment.proposal_id,
+            payment_id=payment.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Captured amount or currency does not match authoritative purchase value.",
+        )
+
+    # 6. Verified successful capture: Update payment and policy budget once
+    payment.status = "captured"
+    payment.paypal_capture_id = capture_id
+
+    policy = db.query(Policy).first()
+    if policy:
+        policy.successful_spend_cents += payment.amount_cents
+
+    db.commit()
+    db.refresh(payment)
+
+    # 7. Immutable audit logging
+    audit_service.log(
+        db=db,
+        event_type="PAYMENT_CAPTURED",
+        details={
+            "paypal_order_id": payload.paypal_order_id,
+            "paypal_capture_id": capture_id,
+            "amount_cents": payment.amount_cents,
+            "currency": payment.currency,
+            "new_successful_spend_cents": policy.successful_spend_cents if policy else 0,
+        },
+        proposal_id=payment.proposal_id,
+        payment_id=payment.id,
+    )
+
+    return payment
+
+
+@router.post("/cancel")
+def cancel_payment_order(
+    payload: CancelOrderRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Records payment cancellation. Does NOT count towards budget spend.
+    """
+    payment = db.query(Payment).filter(Payment.paypal_order_id == payload.paypal_order_id).first()
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment for order '{payload.paypal_order_id}' was not found.",
+        )
+
+    payment.status = "cancelled"
+    db.commit()
+
+    audit_service.log(
+        db=db,
+        event_type="PAYMENT_CANCELLED",
+        details={"paypal_order_id": payload.paypal_order_id},
+        proposal_id=payment.proposal_id,
+        payment_id=payment.id,
+    )
+
+    return {"status": "cancelled", "payment_id": payment.id}
+
+
+@router.get("/{payment_id}", response_model=PaymentRead)
+def get_payment(payment_id: str, db: Session = Depends(get_db)):
+    """Fetch payment status and capture details."""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment '{payment_id}' was not found.",
+        )
+    return payment

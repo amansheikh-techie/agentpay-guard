@@ -63,3 +63,9 @@ export const captureOrder = (paypalOrderId: string) =>
     method: 'POST',
     body: JSON.stringify({ paypal_order_id: paypalOrderId }),
   });
+
+export const cancelOrder = (paypalOrderId: string) =>
+  request<{ status: string; payment_id: string }>('/payments/cancel', {
+    method: 'POST',
+    body: JSON.stringify({ paypal_order_id: paypalOrderId }),
+  });
