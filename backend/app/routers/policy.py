@@ -63,3 +63,32 @@ def update_policy(body: PolicyUpdate, db: Session = Depends(get_db)):
     )
 
     return PolicyRead.model_validate(policy)
+
+
+@router.post("/policy/reset", response_model=PolicyRead, tags=["policy"])
+def reset_policy(db: Session = Depends(get_db)):
+    """
+    Reset demo policy and budget counters to initial state for repeat demo runs.
+    """
+    from app.seed import DEFAULT_POLICY
+    policy = _get_policy(db)
+    policy.total_budget_cents = DEFAULT_POLICY["total_budget_cents"]
+    policy.max_per_order_cents = DEFAULT_POLICY["max_per_order_cents"]
+    policy.currency = DEFAULT_POLICY["currency"]
+    policy.approved_merchant_ids = DEFAULT_POLICY["approved_merchant_ids"]
+    policy.require_approval = DEFAULT_POLICY["require_approval"]
+    policy.successful_spend_cents = 0
+    db.commit()
+    db.refresh(policy)
+
+    audit_service.log(
+        db,
+        event_type="DEMO_RESET",
+        details={
+            "action": "Reset spending policy and budget counters to pristine demo defaults",
+            "total_budget_cents": policy.total_budget_cents,
+            "max_per_order_cents": policy.max_per_order_cents,
+        },
+    )
+
+    return PolicyRead.model_validate(policy)

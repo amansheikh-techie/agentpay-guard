@@ -85,3 +85,24 @@ def test_propose_rejects_empty_request(client):
     """Validation rejects empty or whitespace-only requests."""
     res = client.post("/api/agent/propose", json={"user_request": "   "})
     assert res.status_code == 422
+
+
+def test_reset_policy_endpoint(client):
+    """POST /api/policy/reset restores default policy and clears spend."""
+    # First modify policy
+    client.put("/api/policy", json={
+        "total_budget_cents": 5000,
+        "max_per_order_cents": 2000,
+        "currency": "USD",
+        "approved_merchant_ids": ["techcore"],
+        "require_approval": True,
+    })
+
+    # Call reset
+    reset_res = client.post("/api/policy/reset")
+    assert reset_res.status_code == 200
+    data = reset_res.json()
+    assert data["total_budget_cents"] == 10000
+    assert data["max_per_order_cents"] == 4000
+    assert data["successful_spend_cents"] == 0
+    assert "homeplus" in data["approved_merchant_ids"]

@@ -34,6 +34,9 @@ export const fetchPolicy = (): Promise<Policy> => request<Policy>('/policy');
 export const updatePolicy = (body: Partial<Policy>): Promise<Policy> =>
   request<Policy>('/policy', { method: 'PUT', body: JSON.stringify(body) });
 
+export const resetPolicy = (): Promise<Policy> =>
+  request<Policy>('/policy/reset', { method: 'POST' });
+
 // ── Products ─────────────────────────────────────────────────────────────────
 export const fetchProducts = (): Promise<Product[]> => request<Product[]>('/products');
 

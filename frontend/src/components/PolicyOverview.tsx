@@ -1,8 +1,7 @@
-// components/PolicyOverview.tsx — Spending policy dashboard and live rule editor
 import { useState } from 'react';
-import { ShieldCheck, Edit3, Check, X, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Edit3, Check, X, AlertCircle, RotateCcw } from 'lucide-react';
 import type { Policy } from '../types';
-import { updatePolicy } from '../api/client';
+import { updatePolicy, resetPolicy } from '../api/client';
 
 interface Props {
   policy: Policy | null;
@@ -23,7 +22,20 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
   const [capDollars, setCapDollars] = useState('40.00');
   const [selectedMerchants, setSelectedMerchants] = useState<string[]>(['techcore', 'homeplus']);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  const handleResetDemo = async () => {
+    setResetting(true);
+    try {
+      const reset = await resetPolicy();
+      onPolicyUpdated(reset);
+    } catch (err) {
+      console.error('Failed to reset demo state:', err);
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const startEdit = () => {
     if (!policy) return;
@@ -111,15 +123,28 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
           <h2>Deterministic Spending Policy</h2>
         </div>
         {!editing ? (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={startEdit}
-            style={{ fontSize: '0.78rem', gap: '0.35rem' }}
-          >
-            <Edit3 size={14} />
-            Edit Rules
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={handleResetDemo}
+              disabled={resetting}
+              style={{ fontSize: '0.75rem', gap: '0.3rem', color: 'var(--text-muted)' }}
+              title="Reset policy and budget to pristine demo defaults"
+            >
+              <RotateCcw size={12} className={resetting ? 'spinner' : ''} />
+              Reset Demo
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={startEdit}
+              style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+            >
+              <Edit3 size={14} />
+              Edit Rules
+            </button>
+          </div>
         ) : (
           <button
             type="button"
