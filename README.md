@@ -195,6 +195,12 @@ pytest tests/ -v
 
 ---
 
+## Hackathon Submission Materials
+
+For the full Devpost submission description, video recording script, screenshot checklist, and evaluation guide, see [SUBMISSION_MATERIALS.md](./SUBMISSION_MATERIALS.md).
+
+---
+
 ## Licence
 
 MIT — see [LICENSE](./LICENSE).
