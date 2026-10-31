@@ -117,31 +117,31 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
 
   return (
     <div className="card">
-      <div className="card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+      <div className="card-header" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.625rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', minWidth: 0 }}>
           <div className="card-icon"><ShieldCheck size={18} /></div>
-          <h2>Deterministic Spending Policy</h2>
+          <h2 style={{ fontSize: '1.15rem', whiteSpace: 'nowrap' }}>Spending Policy</h2>
         </div>
         {!editing ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <div className="card-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
             <button
               type="button"
               className="btn btn-ghost btn-sm"
               onClick={handleResetDemo}
               disabled={resetting}
-              style={{ fontSize: '0.75rem', gap: '0.3rem', color: 'var(--text-muted)' }}
+              style={{ fontSize: '0.74rem', gap: '0.25rem', padding: '0.35rem 0.55rem', color: 'var(--text-secondary)' }}
               title="Reset policy and budget to pristine demo defaults"
             >
-              <RotateCcw size={12} className={resetting ? 'spinner' : ''} />
+              <RotateCcw size={12} className={resetting ? 'spin-anim' : ''} />
               Reset Demo
             </button>
             <button
               type="button"
               className="btn btn-ghost btn-sm"
               onClick={startEdit}
-              style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+              style={{ fontSize: '0.74rem', gap: '0.25rem', padding: '0.35rem 0.55rem' }}
             >
-              <Edit3 size={14} />
+              <Edit3 size={12} />
               Edit Rules
             </button>
           </div>
@@ -150,9 +150,9 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => setEditing(false)}
-            style={{ fontSize: '0.78rem', gap: '0.35rem' }}
+            style={{ fontSize: '0.74rem', gap: '0.25rem', padding: '0.35rem 0.55rem' }}
           >
-            <X size={14} />
+            <X size={12} />
             Cancel
           </button>
         )}
@@ -181,14 +181,26 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
             </div>
           </div>
 
-          {/* Utilization bar */}
+          {/* Budget progress bar: spent vs total & remaining */}
           <div className="budget-bar-wrap">
-            <div className="budget-bar-label">
-              <span>Budget Utilisation</span>
-              <span>{pct}%</span>
+            <div className="budget-bar-label" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.25rem' }}>
+              <span>
+                Spent: <strong style={{ color: 'var(--text-primary)' }}>${spent.toFixed(2)}</strong> of ${total.toFixed(2)}
+              </span>
+              <span style={{ fontWeight: 600, color: remaining > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                ${remaining.toFixed(2)} remaining
+              </span>
             </div>
-            <div className="budget-bar-track">
-              <div className="budget-bar-fill" style={{ width: `${pct}%` }} />
+            <div className="budget-bar-track" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+              <div
+                className={`budget-bar-fill ${pct >= 90 ? 'danger' : pct >= 70 ? 'warning' : ''}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+              <span>0%</span>
+              <span>{pct}% utilized</span>
+              <span>100%</span>
             </div>
           </div>
 
@@ -202,7 +214,7 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
                 const found = ALL_MERCHANTS.find(m => m.id === id);
                 return (
                   <span key={id} className="merchant-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Check size={12} color="var(--primary)" />
+                    <Check size={12} color="var(--accent)" />
                     {found ? found.name : id}
                   </span>
                 );
@@ -210,7 +222,7 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
             </div>
           </div>
 
-          <div style={{ marginTop: '0.875rem', padding: '0.625rem 0.75rem', background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+          <div style={{ marginTop: '0.875rem', padding: '0.625rem 0.75rem', background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.45, whiteSpace: 'normal', overflowWrap: 'break-word' }}>
             🔒 <strong>Human Approval Required</strong>: The AI cannot autonomously spend. Every purchase requires explicit user confirmation.
           </div>
         </>
@@ -223,7 +235,7 @@ export default function PolicyOverview({ policy, loading, onPolicyUpdated }: Pro
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
             <div className="form-group">
               <label className="form-label" htmlFor="edit-budget">Total Budget ($ USD)</label>
               <input

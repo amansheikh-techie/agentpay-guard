@@ -10,17 +10,20 @@ interface Props {
 
 const DEMO_SCENARIOS = [
   {
-    tag: 'Scenario A (Allowed)',
+    chip: 'Allowed',
+    chipClass: 'chip-allowed',
     text: 'Find a wireless mouse for work, under $35, from an approved merchant.',
     hint: 'Meets cap ($29.99 < $40), merchant TechCore is approved.',
   },
   {
-    tag: 'Scenario B (Blocked: Cap)',
+    chip: 'Blocked: Cap',
+    chipClass: 'chip-blocked',
     text: 'I need a high-end mechanical keyboard for typing.',
     hint: 'Product costs $79.99, exceeds $40 per-order limit.',
   },
   {
-    tag: 'Scenario C (Blocked: Merchant)',
+    chip: 'Blocked: Merchant',
+    chipClass: 'chip-merchant',
     text: 'Find a shadowtech gadget for my desk.',
     hint: 'Merchant ShadowTech is NOT in approved list.',
   },
@@ -28,6 +31,7 @@ const DEMO_SCENARIOS = [
 
 export default function RequestPanel({ onProposalCreated }: Props) {
   const [requestText, setRequestText] = useState('');
+  const [selectedScenarioIndex, setSelectedScenarioIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +62,7 @@ export default function RequestPanel({ onProposalCreated }: Props) {
         <h2>AI Shopping Agent</h2>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', minWidth: 0 }}>
         {error && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', color: 'var(--danger)', fontSize: '0.8rem' }}>
             <AlertCircle size={15} />
@@ -66,7 +70,7 @@ export default function RequestPanel({ onProposalCreated }: Props) {
           </div>
         )}
 
-        <div className="form-group">
+        <div className="form-group" style={{ width: '100%', minWidth: 0 }}>
           <label className="form-label" htmlFor="shopping-request">
             Natural-Language Request
           </label>
@@ -75,46 +79,46 @@ export default function RequestPanel({ onProposalCreated }: Props) {
             className="form-textarea"
             placeholder="e.g. Find a wireless mouse for work, under $35, from an approved merchant."
             value={requestText}
-            onChange={e => setRequestText(e.target.value)}
+            onChange={e => {
+              const val = e.target.value;
+              setRequestText(val);
+              if (selectedScenarioIndex !== null && val !== DEMO_SCENARIOS[selectedScenarioIndex]?.text) {
+                setSelectedScenarioIndex(null);
+              }
+            }}
             rows={3}
             disabled={loading}
           />
         </div>
 
         {/* Demo Scenario Quick-Picks */}
-        <div>
-          <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        <div style={{ width: '100%', minWidth: 0 }}>
+          <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             Test Hackathon Demo Scenarios:
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-            {DEMO_SCENARIOS.map((s, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{
-                  justifyContent: 'flex-start',
-                  textAlign: 'left',
-                  fontSize: '0.78rem',
-                  padding: '0.45rem 0.625rem',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--bg-input)',
-                }}
-                onClick={() => setRequestText(s.text)}
-                disabled={loading}
-              >
-                <div>
-                  <span style={{ fontWeight: 600, color: 'var(--primary)', marginRight: '0.4rem' }}>
-                    {s.tag}:
+          <div className="scenario-list">
+            {DEMO_SCENARIOS.map((s, idx) => {
+              const isSelected = selectedScenarioIndex === idx && requestText === s.text;
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  className={`scenario-btn ${isSelected ? 'selected' : ''}`}
+                  onClick={() => {
+                    setRequestText(s.text);
+                    setSelectedScenarioIndex(idx);
+                  }}
+                  disabled={loading}
+                  aria-pressed={isSelected}
+                >
+                  <span className={`scenario-chip ${s.chipClass}`}>
+                    {s.chip}
                   </span>
-                  <span style={{ color: 'var(--text-primary)' }}>{s.text}</span>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-                    {s.hint}
-                  </div>
-                </div>
-              </button>
-            ))}
+                  <div className="scenario-text">{s.text}</div>
+                  <div className="scenario-hint">{s.hint}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -127,17 +131,17 @@ export default function RequestPanel({ onProposalCreated }: Props) {
           {loading ? (
             <>
               <span className="spinner" />
-              Evaluating with AI &amp; Policy Engine…
+              <span>Checking policy...</span>
             </>
           ) : (
             <>
               <Send size={16} />
-              Propose Purchase
+              <span>Propose Purchase</span>
             </>
           )}
         </button>
 
-        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.4 }}>
+        <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.45, margin: 0 }}>
           🛡️ <strong>Trust Boundary</strong>: The AI model only selects a product ID. Product prices, merchant identity, and policy evaluation are authoritative on the server.
         </p>
       </form>

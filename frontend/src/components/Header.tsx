@@ -33,9 +33,9 @@ export default function Header() {
       {/* Badges */}
       <div className="header-badges">
         {/* Sandbox warning — always visible */}
-        <span className="badge badge-sandbox">
+        <span className="badge badge-sandbox" title="PayPal Sandbox — test mode only">
           <AlertTriangle size={11} />
-          PayPal Sandbox — test only
+          PayPal Sandbox<span className="sandbox-extra"> — test only</span>
         </span>
 
         {/* Backend health */}

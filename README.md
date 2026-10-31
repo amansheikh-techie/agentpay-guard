@@ -12,7 +12,7 @@ A user defines spending limits and approved merchants. An AI agent proposes a pr
 
 ## Architecture
 
-```
+```text
 React UI  ──────── natural-language request ──────► FastAPI
    │                                                    │
    │                                        ┌───────────┤
@@ -37,7 +37,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
+| --- | --- |
 | Frontend | React 19 + Vite + TypeScript |
 | Backend | Python 3.11 + FastAPI + Uvicorn |
 | Persistence | SQLite + SQLAlchemy 2 |
@@ -54,7 +54,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 - **Node.js 18+** — `node --version`
 - **npm 9+** — `npm --version`
 - **Git** — `git --version`
-- A **PayPal Developer** account (free) for sandbox credentials: https://developer.paypal.com/
+- A **PayPal Developer** account (free) for sandbox credentials: <https://developer.paypal.com/>
 - *(Optional)* An OpenAI API key for live AI mode; the app runs in fallback mode without one.
 
 ---
@@ -109,12 +109,13 @@ ADMIN_TOKEN=your_secure_admin_token
 uvicorn app.main:app --reload --port 8000
 ```
 
-Verify: open http://localhost:8000/api/health in your browser. You should see:
+Verify: open <http://localhost:8000/api/health> in your browser. You should see:
+
 ```json
 {"status": "ok", "paypal_mode": "sandbox", ...}
 ```
 
-Interactive API docs: http://localhost:8000/docs
+Interactive API docs: <http://localhost:8000/docs>
 
 ### 4. Frontend setup (new terminal)
 
@@ -124,7 +125,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 — the dashboard should load and show "API Online" in the header.
+Open <http://localhost:5173> — the dashboard should load and show "API Online" in the header.
 
 ---
 
@@ -141,7 +142,7 @@ pytest tests/ -v
 ## Environment Variables
 
 | Variable | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `APP_ENV` | No | `development` (default) |
 | `DATABASE_URL` | No | SQLite path, default `sqlite:///./agentpay_guard.db` |
 | `FRONTEND_ORIGIN` | No | CORS origin for frontend, default `http://localhost:5173` |
@@ -163,6 +164,7 @@ pytest tests/ -v
 ## Concurrency & Budget Safety
 
 AgentPay Guard provides robust multi-order safety:
+
 - **Budget Reservation:** When `POST /api/payments/create-order` evaluates spending policy, it counts not only settled transactions but also active in-flight orders (`pending`, `approved`, `capturing`, `needs_verification` created within the last 30 minutes via `reserved_cents()`). This prevents concurrent requests from exceeding the total budget.
 - **Atomic Capture Claim:** In `capture_payment_order()`, the system atomically claims the payment record (`UPDATE payments SET status='capturing' WHERE status IN ('pending', 'approved')`). If another capture attempt is in progress, the second request immediately receives `409 Conflict`.
 - **Pre-Capture Budget Recheck & Atomic Deduction:** The backend verifies that the budget remains sufficient before calling PayPal, and updates `successful_spend_cents` with an atomic SQL expression. On `ORDER_NOT_APPROVED`, the status safely reverts to `pending` so the buyer can complete checkout.
@@ -171,7 +173,7 @@ AgentPay Guard provides robust multi-order safety:
 
 ## PayPal Sandbox Setup
 
-1. Sign up at https://developer.paypal.com/
+1. Sign up at <https://developer.paypal.com/>
 2. Go to **Apps & Credentials → Create App** (Sandbox)
 3. Copy **Client ID** and **Client Secret** into `backend/.env`
 4. Use the auto-created sandbox buyer account (or create one under **Sandbox → Accounts**) to approve test payments
@@ -181,7 +183,7 @@ AgentPay Guard provides robust multi-order safety:
 ## AI Tools Used
 
 | Tool | Role |
-|---|---|
+| --- | --- |
 | OpenAI (optional) | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. The model has no authority over price, merchant, policy outcome, or payment status. |
 | Deterministic fallback | Keyword-matching engine that selects a catalogue product when no AI key is configured. Clearly labelled "Demo Fallback Mode" — never misrepresented as an LLM response. |
 
@@ -190,7 +192,7 @@ AgentPay Guard provides robust multi-order safety:
 ## Demo Scenarios
 
 | Scenario | Setup | Expected Result |
-|---|---|---|
+| --- | --- | --- |
 | A — Allowed purchase | Budget $100, cap $40, approved merchant, product $30 | ALLOWED → user approves → PayPal Sandbox checkout → backend verifies capture |
 | B — Over per-order limit (Smart Alternatives) | Same policy, user requests $79.99 mechanical keyboard | BLOCKED: `MAX_ORDER_AMOUNT_EXCEEDED` → Agent suggests in-policy alternatives (e.g. $29.99 mouse / $34.99 desk lamp) → user can click "Review this instead" and proceed to PayPal checkout |
 | C — Merchant not approved | Product $25, unapproved merchant | BLOCKED: `MERCHANT_NOT_APPROVED` → In-policy alternatives suggested from approved allowlist |
@@ -202,6 +204,7 @@ AgentPay Guard provides robust multi-order safety:
 ## Smart Alternatives
 
 When a user's request results in a **BLOCKED** primary recommendation (such as exceeding the per-order limit or targeting an unapproved seller):
+
 1. **Plain-English Explanation:** The backend generates an easy-to-understand breakdown of why the item violated policy (`block_explanation`).
 2. **Safe Suggestions:** The AI suggests candidate catalogue products, and the deterministic policy engine verifies each candidate against active limits. Up to 2 verified **ALLOWED** alternatives are returned.
 3. **Seamless Transition:** Each alternative is persisted with its own proposal ID. In the UI, users can simply click **"Review this instead →"** to make the alternative their active proposal, unlocking the standard "Approve & Pay" PayPal Sandbox checkout flow.

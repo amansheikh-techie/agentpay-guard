@@ -87,6 +87,7 @@ export default function App() {
           <DecisionCard
             proposal={activeProposal}
             onPaymentSuccess={handlePaymentSuccess}
+            onSelectAlternative={setActiveProposal}
           />
           <AuditLog
             events={auditEvents}
@@ -99,15 +100,17 @@ export default function App() {
       <footer
         style={{
           textAlign: 'center',
-          padding: '1.25rem',
+          padding: '1.25rem 1rem',
           borderTop: '1px solid var(--border-subtle)',
-          fontSize: '0.75rem',
-          color: 'var(--text-muted)',
+          fontSize: '0.78rem',
+          color: 'var(--text-secondary)',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          gap: '1rem',
+          gap: '0.75rem',
           flexWrap: 'wrap',
+          minWidth: 0,
+          width: '100%',
         }}
       >
         <span>AgentPay Guard — PayPal AI Hackathon 2026 Prototype</span>
@@ -118,7 +121,7 @@ export default function App() {
           href="https://github.com/amansheikh-techie/agentpay-guard"
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}
+          style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}
         >
           GitHub Repository
         </a>
