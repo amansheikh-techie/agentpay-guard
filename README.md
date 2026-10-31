@@ -36,15 +36,15 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 
 ## Tech Stack
 
-| Layer | Technology |
-| --- | --- |
-| Frontend | React 19 + Vite + TypeScript |
-| Backend | Python 3.11 + FastAPI + Uvicorn |
-| Persistence | SQLite + SQLAlchemy 2 |
-| Validation | Pydantic v2 |
-| Payments | PayPal Orders v2 REST API (Sandbox) |
-| AI | OpenAI-compatible via provider adapter + deterministic fallback |
-| Tests | pytest + FastAPI TestClient |
+| Layer       | Technology                                                     |
+| ----------- | -------------------------------------------------------------- |
+| Frontend    | React 19 + Vite + TypeScript                                   |
+| Backend     | Python 3.11 + FastAPI + Uvicorn                                |
+| Persistence | SQLite + SQLAlchemy 2                                          |
+| Validation  | Pydantic v2                                                    |
+| Payments    | PayPal Orders v2 REST API (Sandbox)                            |
+| AI          | OpenAI-compatible via provider adapter + deterministic fallback |
+| Tests       | pytest + FastAPI TestClient                                    |
 
 ---
 
@@ -54,7 +54,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 - **Node.js 18+** — `node --version`
 - **npm 9+** — `npm --version`
 - **Git** — `git --version`
-- A **PayPal Developer** account (free) for sandbox credentials: <https://developer.paypal.com/>
+- A **PayPal Developer** account (free) for sandbox credentials: [https://developer.paypal.com/](https://developer.paypal.com/)
 - *(Optional)* An OpenAI API key for live AI mode; the app runs in fallback mode without one.
 
 ---
@@ -109,13 +109,13 @@ ADMIN_TOKEN=your_secure_admin_token
 uvicorn app.main:app --reload --port 8000
 ```
 
-Verify: open <http://localhost:8000/api/health> in your browser. You should see:
+Verify: open [http://localhost:8000/api/health](http://localhost:8000/api/health) in your browser. You should see:
 
 ```json
 {"status": "ok", "paypal_mode": "sandbox", ...}
 ```
 
-Interactive API docs: <http://localhost:8000/docs>
+Interactive API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ### 4. Frontend setup (new terminal)
 
@@ -125,7 +125,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173> — the dashboard should load and show "API Online" in the header.
+Open [http://localhost:5173](http://localhost:5173) — the dashboard should load and show "API Online" in the header.
 
 ---
 
@@ -141,20 +141,20 @@ pytest tests/ -v
 
 ## Environment Variables
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `APP_ENV` | No | `development` (default) |
-| `DATABASE_URL` | No | SQLite path, default `sqlite:///./agentpay_guard.db` |
-| `FRONTEND_ORIGIN` | No | CORS origin for frontend, default `http://localhost:5173` |
-| `ADMIN_TOKEN` | No* | Required outside `development` for `PUT /api/policy` and `POST /api/policy/reset` |
-| `AI_PROVIDER` | No | `openai`, or `none` (fallback) |
-| `AI_API_KEY` | No | Provider API key — backend only, never in frontend |
-| `AI_MODEL` | No | Model name for the selected provider |
-| `PAYPAL_MODE` | Yes | Must be `sandbox` for this project |
-| `PAYPAL_CLIENT_ID` | Yes* | Sandbox Client ID from developer.paypal.com |
-| `PAYPAL_CLIENT_SECRET` | Yes* | Sandbox Client Secret — **never commit or expose** |
-| `PAYPAL_BASE_URL` | No | `https://api-m.sandbox.paypal.com` |
-| `PAYPAL_CURRENCY` | No | `USD` |
+| Variable               | Required | Description                                                                        |
+| ---------------------- | -------- | ---------------------------------------------------------------------------------- |
+| `APP_ENV`              | No       | `development` (default)                                                            |
+| `DATABASE_URL`         | No       | SQLite path, default `sqlite:///./agentpay_guard.db`                               |
+| `FRONTEND_ORIGIN`      | No       | CORS origin for frontend, default `http://localhost:5173`                          |
+| `ADMIN_TOKEN`          | No*      | Required outside `development` for `PUT /api/policy` and `POST /api/policy/reset`  |
+| `AI_PROVIDER`          | No       | `openai`, or `none` (fallback)                                                     |
+| `AI_API_KEY`           | No       | Provider API key — backend only, never in frontend                                 |
+| `AI_MODEL`             | No       | Model name for the selected provider                                               |
+| `PAYPAL_MODE`          | Yes      | Must be `sandbox` for this project                                                 |
+| `PAYPAL_CLIENT_ID`     | Yes*     | Sandbox Client ID from developer.paypal.com                                        |
+| `PAYPAL_CLIENT_SECRET` | Yes*     | Sandbox Client Secret — **never commit or expose**                                 |
+| `PAYPAL_BASE_URL`      | No       | `https://api-m.sandbox.paypal.com`                                                 |
+| `PAYPAL_CURRENCY`      | No       | `USD`                                                                              |
 
 *Required for PayPal checkout flow. Without them, the UI shows a clear "PayPal unconfigured" message; all non-payment features still work.
 *`ADMIN_TOKEN` is verified using constant-time `secrets.compare_digest` via the `X-Admin-Token` header. Allowed without a token only when `APP_ENV=development`.
@@ -173,7 +173,7 @@ AgentPay Guard provides robust multi-order safety:
 
 ## PayPal Sandbox Setup
 
-1. Sign up at <https://developer.paypal.com/>
+1. Sign up at [https://developer.paypal.com/](https://developer.paypal.com/)
 2. Go to **Apps & Credentials → Create App** (Sandbox)
 3. Copy **Client ID** and **Client Secret** into `backend/.env`
 4. Use the auto-created sandbox buyer account (or create one under **Sandbox → Accounts**) to approve test payments
@@ -182,22 +182,22 @@ AgentPay Guard provides robust multi-order safety:
 
 ## AI Tools Used
 
-| Tool | Role |
-| --- | --- |
-| OpenAI (optional) | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. The model has no authority over price, merchant, policy outcome, or payment status. |
-| Deterministic fallback | Keyword-matching engine that selects a catalogue product when no AI key is configured. Clearly labelled "Demo Fallback Mode" — never misrepresented as an LLM response. |
+| Tool                   | Role                                                                                                                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI (optional)      | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. The model has no authority over price, merchant, policy outcome, or payment status. |
+| Deterministic fallback | Keyword-matching engine that selects a catalogue product when no AI key is configured. Clearly labelled "Demo Fallback Mode" — never misrepresented as an LLM response.                     |
 
 ---
 
 ## Demo Scenarios
 
-| Scenario | Setup | Expected Result |
-| --- | --- | --- |
-| A — Allowed purchase | Budget $100, cap $40, approved merchant, product $30 | ALLOWED → user approves → PayPal Sandbox checkout → backend verifies capture |
-| B — Over per-order limit (Smart Alternatives) | Same policy, user requests $79.99 mechanical keyboard | BLOCKED: `MAX_ORDER_AMOUNT_EXCEEDED` → Agent suggests in-policy alternatives (e.g. $29.99 mouse / $34.99 desk lamp) → user can click "Review this instead" and proceed to PayPal checkout |
-| C — Merchant not approved | Product $25, unapproved merchant | BLOCKED: `MERCHANT_NOT_APPROVED` → In-policy alternatives suggested from approved allowlist |
-| D — Budget exhausted | $80 spent, $30 product proposed | BLOCKED: `TOTAL_BUDGET_EXCEEDED` |
-| E — Payment cancelled | User cancels PayPal checkout | Status: `cancelled` — budget unchanged |
+| Scenario                                     | Setup                                                  | Expected Result                                                                                                                                                                                                            |
+| -------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A — Allowed purchase                         | Budget $100, cap $40, approved merchant, product $30   | ALLOWED → user approves → PayPal Sandbox checkout → backend verifies capture                                                                                                                                              |
+| B — Over per-order limit (Smart Alternatives) | Same policy, user requests $79.99 mechanical keyboard | BLOCKED: `MAX_ORDER_AMOUNT_EXCEEDED` → Agent suggests in-policy alternatives (e.g. $29.99 mouse / $34.99 desk lamp) → user can click "Review this instead" and proceed to PayPal checkout                                 |
+| C — Merchant not approved                    | Product $25, unapproved merchant                       | BLOCKED: `MERCHANT_NOT_APPROVED` → In-policy alternatives suggested from approved allowlist                                                                                                                               |
+| D — Budget exhausted                         | $80 spent, $30 product proposed                        | BLOCKED: `TOTAL_BUDGET_EXCEEDED`                                                                                                                                                                                          |
+| E — Payment cancelled                        | User cancels PayPal checkout                           | Status: `cancelled` — budget unchanged                                                                                                                                                                                     |
 
 ---
 

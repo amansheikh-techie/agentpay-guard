@@ -3,7 +3,7 @@
 > **Project Name:** AgentPay Guard  
 > **Tagline:** A deterministic safety layer for AI shopping agents with human-in-the-loop PayPal Sandbox checkout.  
 > **Built for:** PayPal AI Hackathon 2026  
-> **Repository:** <https://github.com/amansheikh-techie/agentpay-guard>
+> **Repository:** [https://github.com/amansheikh-techie/agentpay-guard](https://github.com/amansheikh-techie/agentpay-guard)
 
 ---
 
