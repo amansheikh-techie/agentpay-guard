@@ -6,9 +6,17 @@ interface Props {
   events: AuditEvent[];
   loading: boolean;
   onRefresh: () => void;
+  selectedFilter?: string;
+  onFilterChange?: (filter: string) => void;
 }
 
-export default function AuditLog({ events, loading, onRefresh }: Props) {
+export default function AuditLog({
+  events,
+  loading,
+  onRefresh,
+  selectedFilter = 'ALL',
+  onFilterChange,
+}: Props) {
   const getEventBadge = (type: string, details: Record<string, unknown>) => {
     switch (type) {
       case 'PROPOSAL_CREATED':
@@ -72,24 +80,43 @@ export default function AuditLog({ events, loading, onRefresh }: Props) {
 
   return (
     <div className="card">
-      <div className="card-header" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="card-header" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
           <div className="card-icon">
             <Activity size={18} />
           </div>
           <h2>Immutable Audit Trail</h2>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={onRefresh}
-          disabled={loading}
-          style={{ fontSize: '0.75rem', gap: '0.35rem', padding: '0.35rem 0.55rem' }}
-          title="Refresh audit events"
-        >
-          <RotateCw size={13} className={loading ? 'spin-anim' : ''} />
-          Refresh
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {onFilterChange && (
+            <select
+              value={selectedFilter}
+              onChange={(e) => onFilterChange(e.target.value)}
+              className="filter-select"
+              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+            >
+              <option value="ALL">All Event Types</option>
+              <option value="PROPOSAL_CREATED">Proposal Created</option>
+              <option value="PAYMENT_CREATED">Payment Created</option>
+              <option value="PAYMENT_CAPTURED">Payment Captured</option>
+              <option value="PAYMENT_CANCELLED">Payment Cancelled</option>
+              <option value="POLICY_UPDATED">Policy Updated</option>
+              <option value="ALTERNATIVES_SUGGESTED">Alternatives Suggested</option>
+              <option value="DEMO_RESET">Demo Reset</option>
+            </select>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onRefresh}
+            disabled={loading}
+            style={{ fontSize: '0.75rem', gap: '0.35rem', padding: '0.35rem 0.55rem' }}
+            title="Refresh audit events"
+          >
+            <RotateCw size={13} className={loading ? 'spin-anim' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {events.length === 0 ? (
