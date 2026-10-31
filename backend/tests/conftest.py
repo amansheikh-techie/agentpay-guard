@@ -67,6 +67,15 @@ def clean_test_db(setup_tables):
     yield
 
 
+@pytest.fixture(autouse=True)
+def mock_ai_fallback(monkeypatch):
+    """Ensure tests run deterministically in fast offline fallback mode without network timeouts."""
+    from app import config
+    settings = config.get_settings()
+    monkeypatch.setattr(settings, "ai_provider", "none")
+    monkeypatch.setattr(settings, "ai_api_key", "")
+
+
 @pytest.fixture
 def client():
     app.dependency_overrides[get_db] = override_get_db

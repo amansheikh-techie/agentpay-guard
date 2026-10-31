@@ -27,6 +27,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "techcore",
         "merchant_name": "TechCore Electronics",
+        "category": "peripherals",
         "features": ["Wireless 2.4 GHz", "1600 DPI", "Ergonomic design", "12-month battery"],
     },
     {
@@ -37,6 +38,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "techcore",
         "merchant_name": "TechCore Electronics",
+        "category": "peripherals",
         "features": ["4x USB-A 3.0", "HDMI 4K", "SD card reader", "100W PD pass-through"],
     },
     {
@@ -47,6 +49,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "techcore",
         "merchant_name": "TechCore Electronics",
+        "category": "peripherals",
         "features": ["1080p 30fps", "Auto-focus", "Noise-cancelling mic", "Plug and play"],
     },
     {
@@ -57,6 +60,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "techcore",
         "merchant_name": "TechCore Electronics",
+        "category": "peripherals",
         "features": ["TKL layout", "Brown switches", "RGB backlight", "USB-C cable"],
     },
     # HomePlus Supplies
@@ -68,6 +72,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "homeplus",
         "merchant_name": "HomePlus Supplies",
+        "category": "office",
         "features": ["3 colour temps", "5 brightness levels", "USB-A charging port", "Memory function"],
     },
     {
@@ -78,6 +83,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "homeplus",
         "merchant_name": "HomePlus Supplies",
+        "category": "office",
         "features": ["Adjustable height", "Storage drawer", "Cable management", "Supports up to 27\""],
     },
     {
@@ -88,6 +94,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "homeplus",
         "merchant_name": "HomePlus Supplies",
+        "category": "office",
         "features": ["10-piece kit", "Adhesive cable clips", "Spiral wrap", "Cable box"],
     },
     # OfficeMate Pro
@@ -99,6 +106,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "officemate",
         "merchant_name": "OfficeMate Pro",
+        "category": "audio",
         "features": ["Active noise cancellation", "Boom mic", "USB + 3.5mm", "15h battery"],
     },
     {
@@ -109,6 +117,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "officemate",
         "merchant_name": "OfficeMate Pro",
+        "category": "office",
         "features": ["A5 size", "Dotted grid", "200 pages", "Lay-flat binding"],
     },
     {
@@ -119,6 +128,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "officemate",
         "merchant_name": "OfficeMate Pro",
+        "category": "office",
         "features": ["12 colours", "0.5 mm tip", "Smear-resistant", "Refillable"],
     },
     # Unapproved merchant product (for demo scenario C)
@@ -130,6 +140,7 @@ DEMO_PRODUCTS = [
         "currency": "USD",
         "merchant_id": "shadowtech",   # NOT in default approved list
         "merchant_name": "ShadowTech (unapproved demo merchant)",
+        "category": "gadgets",
         "features": ["Demo only", "Used to test merchant allowlist enforcement"],
     },
 ]
@@ -138,9 +149,14 @@ DEMO_PRODUCTS = [
 DEFAULT_POLICY = {
     "total_budget_cents": 10000,        # $100.00
     "max_per_order_cents": 4000,        # $40.00
+    "daily_limit_cents": 0,             # 0 = unlimited
+    "monthly_limit_cents": 0,           # 0 = unlimited
     "currency": "USD",
     "approved_merchant_ids": ["techcore", "homeplus"],
+    "blocked_categories": [],
     "require_approval": True,
+    "agent_enabled": True,
+    "policy_version": 1,
     "successful_spend_cents": 0,
 }
 
@@ -157,14 +173,28 @@ def seed_if_empty(db: Session) -> None:
                 currency=p["currency"],
                 merchant_id=p["merchant_id"],
                 merchant_name=p["merchant_name"],
+                category=p.get("category", "peripherals"),
                 active=True,
             )
             product.features = p["features"]
             db.add(product)
         db.commit()
+    else:
+        # Backfill category for existing rows if needed
+        for p in DEMO_PRODUCTS:
+            prod = db.query(Product).filter(Product.id == p["id"]).first()
+            if prod and not prod.category:
+                prod.category = p.get("category", "peripherals")
+        db.commit()
 
     if db.query(Policy).count() == 0:
-        policy = Policy(**{k: v for k, v in DEFAULT_POLICY.items() if k != "approved_merchant_ids"})
+        policy = Policy(
+            **{
+                k: v for k, v in DEFAULT_POLICY.items()
+                if k not in ("approved_merchant_ids", "blocked_categories")
+            }
+        )
         policy.approved_merchant_ids = DEFAULT_POLICY["approved_merchant_ids"]
+        policy.blocked_categories = DEFAULT_POLICY["blocked_categories"]
         db.add(policy)
         db.commit()

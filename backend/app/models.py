@@ -26,9 +26,14 @@ class Policy(Base):
     id = Column(Integer, primary_key=True, index=True)
     total_budget_cents = Column(Integer, nullable=False)          # e.g. 10000 = $100.00
     max_per_order_cents = Column(Integer, nullable=False)         # e.g. 4000  = $40.00
+    daily_limit_cents = Column(Integer, nullable=False, default=0)    # 0 = unlimited
+    monthly_limit_cents = Column(Integer, nullable=False, default=0)  # 0 = unlimited
     currency = Column(String(3), nullable=False, default="USD")
     _approved_merchant_ids = Column("approved_merchant_ids", Text, nullable=False, default="[]")
+    _blocked_categories = Column("blocked_categories", Text, nullable=False, default="[]")
     require_approval = Column(Boolean, nullable=False, default=True)
+    agent_enabled = Column(Boolean, nullable=False, default=True)
+    policy_version = Column(Integer, nullable=False, default=1)
     successful_spend_cents = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=_now)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
@@ -40,6 +45,14 @@ class Policy(Base):
     @approved_merchant_ids.setter
     def approved_merchant_ids(self, value: list[str]):
         self._approved_merchant_ids = json.dumps(value)
+
+    @property
+    def blocked_categories(self) -> list[str]:
+        return json.loads(self._blocked_categories)
+
+    @blocked_categories.setter
+    def blocked_categories(self, value: list[str]):
+        self._blocked_categories = json.dumps(value)
 
     @property
     def remaining_budget_cents(self) -> int:
@@ -57,6 +70,7 @@ class Product(Base):
     currency = Column(String(3), nullable=False, default="USD")
     merchant_id = Column(String(64), nullable=False)
     merchant_name = Column(String(200), nullable=False)
+    category = Column(String(64), nullable=False, default="peripherals")
     _features = Column("features", Text, nullable=False, default="[]")
     active = Column(Boolean, nullable=False, default=True)
 
@@ -116,10 +130,19 @@ class Payment(Base):
     # Possible statuses: pending | approved | captured | cancelled | failed | needs_verification
     status = Column(String(32), nullable=False, default="pending")
     paypal_capture_id = Column(String(128), nullable=True)
+    _approval_binding = Column("approval_binding", Text, nullable=False, default="{}")
     created_at = Column(DateTime(timezone=True), default=_now)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     proposal = relationship("Proposal", back_populates="payments")
+
+    @property
+    def approval_binding(self) -> dict:
+        return json.loads(self._approval_binding)
+
+    @approval_binding.setter
+    def approval_binding(self, value: dict):
+        self._approval_binding = json.dumps(value)
 
 
 class AuditEvent(Base):

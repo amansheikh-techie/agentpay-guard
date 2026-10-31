@@ -32,6 +32,7 @@ from app.schemas import (
     CaptureOrderRequest,
     CancelOrderRequest,
     PaymentRead,
+    PaymentListItem,
 )
 from app.services import paypal_service, audit_service
 from app.services.paypal_service import PayPalError
@@ -57,6 +58,36 @@ def reserved_cents(db: Session, window_minutes: int = 30) -> int:
         .filter(
             Payment.status.in_(IN_FLIGHT_STATUSES),
             Payment.created_at >= cutoff,
+        )
+        .scalar()
+    )
+    return int(total or 0)
+
+
+def daily_spent_cents(db: Session) -> int:
+    """Compute total cents captured in the current UTC calendar day."""
+    now = datetime.now(timezone.utc)
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    total = (
+        db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
+        .filter(
+            Payment.status == "captured",
+            Payment.created_at >= start_of_day,
+        )
+        .scalar()
+    )
+    return int(total or 0)
+
+
+def monthly_spent_cents(db: Session) -> int:
+    """Compute total cents captured in the current UTC calendar month."""
+    now = datetime.now(timezone.utc)
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    total = (
+        db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
+        .filter(
+            Payment.status == "captured",
+            Payment.created_at >= start_of_month,
         )
         .scalar()
     )
@@ -111,16 +142,23 @@ def create_payment_order(
     policy_snap = PolicySnapshot(
         total_budget_cents=policy.total_budget_cents,
         max_per_order_cents=policy.max_per_order_cents,
+        daily_limit_cents=policy.daily_limit_cents,
+        monthly_limit_cents=policy.monthly_limit_cents,
         currency=policy.currency,
         approved_merchant_ids=policy.approved_merchant_ids,
+        blocked_categories=policy.blocked_categories,
         require_approval=policy.require_approval,
+        agent_enabled=policy.agent_enabled,
         successful_spend_cents=effective_spend_cents,
+        daily_spend_cents=daily_spent_cents(db),
+        monthly_spend_cents=monthly_spent_cents(db),
     )
     product_snap = ProductSnapshot(
         id=product.id,
         price_cents=product.price_cents,
         currency=product.currency,
         merchant_id=product.merchant_id,
+        category=product.category,
     )
 
     recheck_result = evaluate(policy_snap, product_snap, human_approved=payload.user_approved)
@@ -175,6 +213,12 @@ def create_payment_order(
     )
 
     # 7. Record Payment
+    binding = payload.approval_binding or {
+        "product_id": product.id,
+        "price_cents": product.price_cents,
+        "merchant_id": product.merchant_id,
+        "policy_version": policy.policy_version,
+    }
     payment = Payment(
         id=payment_id,
         proposal_id=proposal.id,
@@ -183,6 +227,7 @@ def create_payment_order(
         currency=product.currency,
         status="pending",
     )
+    payment.approval_binding = binding
     db.add(payment)
     proposal.status = "approved"
     db.commit()
@@ -227,6 +272,17 @@ def capture_payment_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Payment for PayPal order '{payload.paypal_order_id}' was not found.",
         )
+
+    # 1b. Verify approval binding integrity
+    if payment.approval_binding:
+        binding = payment.approval_binding
+        if binding.get("price_cents") and binding["price_cents"] != payment.amount_cents:
+            payment.status = "needs_verification"
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Security alert: Purchase amount changed between approval and capture (APPROVAL_MISMATCH).",
+            )
 
     # 2. Idempotency protection: If already captured, return existing state without deducting again
     if payment.status == "captured":
@@ -426,6 +482,52 @@ def cancel_payment_order(
     )
 
     return {"status": "cancelled", "payment_id": payment.id}
+
+
+@router.get("", response_model=list[PaymentListItem])
+def list_payments(
+    status: str | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """Return historical transactions, newest first, with optional status filter."""
+    query = (
+        db.query(
+            Payment.id,
+            Payment.proposal_id,
+            Payment.paypal_order_id,
+            Payment.amount_cents,
+            Payment.currency,
+            Payment.status,
+            Payment.paypal_capture_id,
+            Product.name.label("product_name"),
+            Product.merchant_name.label("merchant_name"),
+            Payment.created_at,
+            Payment.updated_at,
+        )
+        .outerjoin(Proposal, Proposal.id == Payment.proposal_id)
+        .outerjoin(Product, Product.id == Proposal.selected_product_id)
+    )
+    if status:
+        query = query.filter(Payment.status == status)
+
+    rows = query.order_by(Payment.created_at.desc()).limit(limit).all()
+    return [
+        PaymentListItem(
+            id=r.id,
+            proposal_id=r.proposal_id,
+            paypal_order_id=r.paypal_order_id,
+            amount_cents=r.amount_cents,
+            currency=r.currency,
+            status=r.status,
+            paypal_capture_id=r.paypal_capture_id,
+            product_name=r.product_name,
+            merchant_name=r.merchant_name,
+            created_at=r.created_at,
+            updated_at=r.updated_at,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/{payment_id}", response_model=PaymentRead)

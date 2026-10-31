@@ -46,9 +46,19 @@ def update_policy(body: PolicyUpdate, db: Session = Depends(get_db)):
 
     policy.total_budget_cents = body.total_budget_cents
     policy.max_per_order_cents = body.max_per_order_cents
+    if body.daily_limit_cents is not None:
+        policy.daily_limit_cents = body.daily_limit_cents
+    if body.monthly_limit_cents is not None:
+        policy.monthly_limit_cents = body.monthly_limit_cents
     policy.currency = body.currency
     policy.approved_merchant_ids = body.approved_merchant_ids
+    if body.blocked_categories is not None:
+        policy.blocked_categories = body.blocked_categories
     policy.require_approval = body.require_approval
+    if body.agent_enabled is not None:
+        policy.agent_enabled = body.agent_enabled
+    policy.policy_version = (policy.policy_version or 1) + 1
+
     db.commit()
     db.refresh(policy)
 
@@ -58,8 +68,13 @@ def update_policy(body: PolicyUpdate, db: Session = Depends(get_db)):
         details={
             "total_budget_cents": body.total_budget_cents,
             "max_per_order_cents": body.max_per_order_cents,
+            "daily_limit_cents": policy.daily_limit_cents,
+            "monthly_limit_cents": policy.monthly_limit_cents,
             "approved_merchant_ids": body.approved_merchant_ids,
+            "blocked_categories": policy.blocked_categories,
             "require_approval": body.require_approval,
+            "agent_enabled": policy.agent_enabled,
+            "policy_version": policy.policy_version,
         },
     )
 
@@ -75,9 +90,14 @@ def reset_policy(db: Session = Depends(get_db)):
     policy = _get_policy(db)
     policy.total_budget_cents = DEFAULT_POLICY["total_budget_cents"]
     policy.max_per_order_cents = DEFAULT_POLICY["max_per_order_cents"]
+    policy.daily_limit_cents = DEFAULT_POLICY.get("daily_limit_cents", 0)
+    policy.monthly_limit_cents = DEFAULT_POLICY.get("monthly_limit_cents", 0)
     policy.currency = DEFAULT_POLICY["currency"]
     policy.approved_merchant_ids = DEFAULT_POLICY["approved_merchant_ids"]
+    policy.blocked_categories = DEFAULT_POLICY.get("blocked_categories", [])
     policy.require_approval = DEFAULT_POLICY["require_approval"]
+    policy.agent_enabled = DEFAULT_POLICY.get("agent_enabled", True)
+    policy.policy_version = 1
     policy.successful_spend_cents = 0
     db.commit()
     db.refresh(policy)
@@ -89,6 +109,7 @@ def reset_policy(db: Session = Depends(get_db)):
             "action": "Reset spending policy and budget counters to pristine demo defaults",
             "total_budget_cents": policy.total_budget_cents,
             "max_per_order_cents": policy.max_per_order_cents,
+            "policy_version": policy.policy_version,
         },
     )
 

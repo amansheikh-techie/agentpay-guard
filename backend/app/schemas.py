@@ -16,9 +16,14 @@ class PolicyRead(BaseModel):
     id: int
     total_budget_cents: int
     max_per_order_cents: int
+    daily_limit_cents: int = 0
+    monthly_limit_cents: int = 0
     currency: str
     approved_merchant_ids: list[str]
+    blocked_categories: list[str] = Field(default_factory=list)
     require_approval: bool
+    agent_enabled: bool = True
+    policy_version: int = 1
     successful_spend_cents: int
     remaining_budget_cents: int = 0
     created_at: datetime
@@ -39,13 +44,16 @@ class PolicyRead(BaseModel):
         return instance
 
 
-
 class PolicyUpdate(BaseModel):
     total_budget_cents: int = Field(..., gt=0, description="Must be > 0")
     max_per_order_cents: int = Field(..., gt=0, description="Must be > 0")
+    daily_limit_cents: Optional[int] = Field(default=0, ge=0)
+    monthly_limit_cents: Optional[int] = Field(default=0, ge=0)
     currency: str = Field(default="USD", pattern="^[A-Z]{3}$")
     approved_merchant_ids: list[str] = Field(..., min_length=1)
+    blocked_categories: Optional[list[str]] = Field(default_factory=list)
     require_approval: bool = True
+    agent_enabled: Optional[bool] = True
 
     @field_validator("max_per_order_cents")
     @classmethod
@@ -66,6 +74,7 @@ class ProductRead(BaseModel):
     currency: str
     merchant_id: str
     merchant_name: str
+    category: str = "peripherals"
     features: list[str]
     active: bool
 
@@ -73,6 +82,12 @@ class ProductRead(BaseModel):
 
 
 # ── Proposal ──────────────────────────────────────────────────────────────────
+
+class ExtractedRequirements(BaseModel):
+    category: Optional[str] = None
+    max_price_cents: Optional[int] = None
+    features: list[str] = Field(default_factory=list)
+
 
 class ProposeRequest(BaseModel):
     user_request: str = Field(..., max_length=1000)
@@ -99,6 +114,12 @@ class ProposalRead(BaseModel):
     ai_mode: Literal["live", "fallback"]
     block_explanation: Optional[str] = None
     alternatives: list[ProposalRead] = Field(default_factory=list)
+    extracted_requirements: Optional[ExtractedRequirements] = None
+    rank: Optional[int] = 1
+    matched_requirements: list[str] = Field(default_factory=list)
+    unmet_requirements: list[str] = Field(default_factory=list)
+    price_difference_cents: Optional[int] = None
+    candidates: list[ProposalRead] = Field(default_factory=list)
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -110,6 +131,7 @@ class CreateOrderRequest(BaseModel):
     proposal_id: str
     # user_approved must be True — explicit consent signal from frontend
     user_approved: bool = Field(..., description="Must be True — explicit user approval required")
+    approval_binding: Optional[dict] = None
 
     @field_validator("user_approved")
     @classmethod
@@ -146,6 +168,41 @@ class PaymentRead(BaseModel):
 
 class CancelOrderRequest(BaseModel):
     paypal_order_id: str
+
+
+class PaymentListItem(BaseModel):
+    id: str
+    proposal_id: str
+    paypal_order_id: Optional[str] = None
+    amount_cents: int
+    currency: str
+    status: str
+    paypal_capture_id: Optional[str] = None
+    product_name: Optional[str] = None
+    merchant_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MerchantSpendSummary(BaseModel):
+    merchant_id: str
+    merchant_name: str
+    total_cents: int
+    order_count: int
+
+
+class SummaryResponse(BaseModel):
+    completed_cents: int
+    reserved_cents: int
+    remaining_cents: int
+    daily_spent_cents: int
+    monthly_spent_cents: int
+    blocked_count: int
+    completed_count: int
+    failed_count: int
+    by_merchant: list[MerchantSpendSummary]
 
 
 # ── Audit ─────────────────────────────────────────────────────────────────────

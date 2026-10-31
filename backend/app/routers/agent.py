@@ -11,13 +11,14 @@ Trust Boundaries:
   4. Any candidate ID not in the authoritative catalogue is discarded.
   5. The result (ALLOWED or BLOCKED) and explanations are recorded in proposals and audit_events.
 """
+import re
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Policy, Product, Proposal
-from app.schemas import ProposeRequest, ProposalRead, ProductRead
+from app.schemas import ProposeRequest, ProposalRead, ProductRead, ExtractedRequirements
 from app.services import ai_service, audit_service
 from app.services.policy_engine import (
     PolicySnapshot,
@@ -25,8 +26,45 @@ from app.services.policy_engine import (
     PolicyResult,
     evaluate_proposal,
 )
+from app.routers.payments import daily_spent_cents, monthly_spent_cents
 
 router = APIRouter()
+
+
+def _extract_requirements(text: str) -> ExtractedRequirements:
+    cat = None
+    tl = text.lower()
+    if any(w in tl for w in ["mouse", "mice", "keyboard", "hub", "webcam"]):
+        cat = "peripherals"
+    elif any(w in tl for w in ["headset", "audio", "mic", "earphone", "headphone"]):
+        cat = "audio"
+    elif any(w in tl for w in ["lamp", "stand", "notebook", "pen", "desk", "organiser", "organizer", "office"]):
+        cat = "office"
+    elif "gadget" in tl:
+        cat = "gadgets"
+
+    max_p = None
+    price_match = re.search(r"\$(\d+)(?:\.(\d{2}))?", text)
+    if price_match:
+        dollars = int(price_match.group(1))
+        cents = int(price_match.group(2) or 0)
+        max_p = dollars * 100 + cents
+    else:
+        under_match = re.search(r"under\s+(\d+)", tl)
+        if under_match:
+            max_p = int(under_match.group(1)) * 100
+
+    features = []
+    if "wireless" in tl:
+        features.append("Wireless")
+    if "ergonomic" in tl:
+        features.append("Ergonomic")
+    if "noise" in tl or "cancelling" in tl:
+        features.append("Noise cancelling")
+    if "usb" in tl:
+        features.append("USB-C / USB")
+
+    return ExtractedRequirements(category=cat, max_price_cents=max_p, features=features)
 
 
 @router.post("/propose", response_model=ProposalRead, status_code=status.HTTP_201_CREATED)
@@ -78,13 +116,21 @@ def propose_purchase(
             detail="Spending policy is not configured.",
         )
 
+    extracted_reqs = _extract_requirements(payload.user_request)
+
     policy_snap = PolicySnapshot(
         total_budget_cents=policy.total_budget_cents,
         max_per_order_cents=policy.max_per_order_cents,
+        daily_limit_cents=policy.daily_limit_cents,
+        monthly_limit_cents=policy.monthly_limit_cents,
         currency=policy.currency,
         approved_merchant_ids=policy.approved_merchant_ids,
+        blocked_categories=policy.blocked_categories,
         require_approval=policy.require_approval,
+        agent_enabled=policy.agent_enabled,
         successful_spend_cents=policy.successful_spend_cents,
+        daily_spend_cents=daily_spent_cents(db),
+        monthly_spend_cents=monthly_spent_cents(db),
     )
 
     # 5. Evaluate primary proposal deterministically
@@ -100,6 +146,7 @@ def propose_purchase(
             price_cents=primary_product.price_cents,
             currency=primary_product.currency,
             merchant_id=primary_product.merchant_id,
+            category=primary_product.category,
         )
         primary_decision = evaluate_proposal(policy_snap, primary_snap)
 
@@ -178,6 +225,7 @@ def propose_purchase(
                 price_cents=cand_prod.price_cents,
                 currency=cand_prod.currency,
                 merchant_id=cand_prod.merchant_id,
+                category=cand_prod.category,
             )
             cand_decision = evaluate_proposal(policy_snap, cand_snap)
             if cand_decision.decision == "ALLOWED":
@@ -188,7 +236,7 @@ def propose_purchase(
         # Persist each alternative as its own Proposal row so it can be approved
         alt_ids = []
         alt_product_ids = []
-        for alt_prod, alt_reason in allowed_alternatives:
+        for idx, (alt_prod, alt_reason) in enumerate(allowed_alternatives):
             alt_id = f"prop_{uuid.uuid4().hex[:12]}"
             alt_rationale = (
                 f"[Alternative Proposal] {alt_reason}. "
@@ -212,6 +260,12 @@ def propose_purchase(
             alt_ids.append(alt_id)
             alt_product_ids.append(alt_prod.id)
 
+            price_diff = (
+                alt_prod.price_cents - primary_product.price_cents
+                if primary_product
+                else 0
+            )
+
             alternatives_read.append(
                 ProposalRead(
                     id=alt_id,
@@ -226,6 +280,11 @@ def propose_purchase(
                     ai_mode=ai_result.ai_mode,
                     block_explanation=None,
                     alternatives=[],
+                    rank=idx + 2,
+                    matched_requirements=[f"Category: {alt_prod.category}", f"Sold by {alt_prod.merchant_name}"],
+                    unmet_requirements=[],
+                    price_difference_cents=price_diff,
+                    candidates=[],
                     created_at=alt_proposal.created_at,
                 )
             )
@@ -255,5 +314,11 @@ def propose_purchase(
         ai_mode=primary_proposal.ai_mode,
         block_explanation=block_explanation,
         alternatives=alternatives_read,
+        extracted_requirements=extracted_reqs,
+        rank=1,
+        matched_requirements=rec.matched_requirements,
+        unmet_requirements=rec.unmet_requirements,
+        price_difference_cents=0,
+        candidates=alternatives_read,
         created_at=primary_proposal.created_at,
     )
