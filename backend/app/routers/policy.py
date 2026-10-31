@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Policy, Product
 from app.schemas import PolicyRead, PolicyUpdate
+from app.security import require_admin
 from app.services import audit_service
 
 router = APIRouter()
@@ -26,7 +27,7 @@ def get_policy(db: Session = Depends(get_db)):
     return PolicyRead.model_validate(policy)
 
 
-@router.put("/policy", response_model=PolicyRead, tags=["policy"])
+@router.put("/policy", response_model=PolicyRead, tags=["policy"], dependencies=[Depends(require_admin)])
 def update_policy(body: PolicyUpdate, db: Session = Depends(get_db)):
     """
     Update spending policy.
@@ -65,7 +66,7 @@ def update_policy(body: PolicyUpdate, db: Session = Depends(get_db)):
     return PolicyRead.model_validate(policy)
 
 
-@router.post("/policy/reset", response_model=PolicyRead, tags=["policy"])
+@router.post("/policy/reset", response_model=PolicyRead, tags=["policy"], dependencies=[Depends(require_admin)])
 def reset_policy(db: Session = Depends(get_db)):
     """
     Reset demo policy and budget counters to initial state for repeat demo runs.

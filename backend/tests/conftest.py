@@ -31,7 +31,7 @@ def override_get_db():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_test_db():
+def setup_tables():
     Base.metadata.create_all(bind=test_engine)
     from app.seed import seed_if_empty
     db = TestSessionLocal()
@@ -41,6 +41,30 @@ def setup_test_db():
         db.close()
     yield
     Base.metadata.drop_all(bind=test_engine)
+
+
+@pytest.fixture(autouse=True)
+def clean_test_db(setup_tables):
+    """Ensure each test runs with clean database records."""
+    db = TestSessionLocal()
+    try:
+        from app.models import Payment, Proposal, AuditEvent, Policy
+        from app.seed import DEFAULT_POLICY
+        db.query(Payment).delete()
+        db.query(Proposal).delete()
+        db.query(AuditEvent).delete()
+        policy = db.query(Policy).first()
+        if policy:
+            policy.total_budget_cents = DEFAULT_POLICY["total_budget_cents"]
+            policy.max_per_order_cents = DEFAULT_POLICY["max_per_order_cents"]
+            policy.currency = DEFAULT_POLICY["currency"]
+            policy.approved_merchant_ids = DEFAULT_POLICY["approved_merchant_ids"]
+            policy.require_approval = DEFAULT_POLICY["require_approval"]
+            policy.successful_spend_cents = 0
+        db.commit()
+    finally:
+        db.close()
+    yield
 
 
 @pytest.fixture

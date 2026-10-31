@@ -97,6 +97,8 @@ class ProposalRead(BaseModel):
     decision_reasons: list[str]
     decision_explanations: list[str]
     ai_mode: Literal["live", "fallback"]
+    block_explanation: Optional[str] = None
+    alternatives: list[ProposalRead] = Field(default_factory=list)
     created_at: datetime
 
     model_config = {"from_attributes": True}

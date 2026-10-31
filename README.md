@@ -43,7 +43,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 | Persistence | SQLite + SQLAlchemy 2 |
 | Validation | Pydantic v2 |
 | Payments | PayPal Orders v2 REST API (Sandbox) |
-| AI | Gemini or OpenAI-compatible via provider adapter + deterministic fallback |
+| AI | OpenAI-compatible via provider adapter + deterministic fallback |
 | Tests | pytest + FastAPI TestClient |
 
 ---
@@ -55,7 +55,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 - **npm 9+** — `npm --version`
 - **Git** — `git --version`
 - A **PayPal Developer** account (free) for sandbox credentials: https://developer.paypal.com/
-- *(Optional)* A Gemini or OpenAI API key for live AI mode; the app runs in fallback mode without one.
+- *(Optional)* An OpenAI API key for live AI mode; the app runs in fallback mode without one.
 
 ---
 
@@ -92,9 +92,12 @@ PAYPAL_CLIENT_ID=your_sandbox_client_id
 PAYPAL_CLIENT_SECRET=your_sandbox_client_secret
 
 # AI Provider (optional — leave blank for deterministic fallback mode)
-AI_PROVIDER=gemini        # or "openai"
+AI_PROVIDER=openai        # or "none"
 AI_API_KEY=your_api_key
-AI_MODEL=gemini-1.5-flash # or gpt-4o-mini
+AI_MODEL=gpt-4o-mini
+
+# Admin Security (optional in development; required in production)
+ADMIN_TOKEN=your_secure_admin_token
 ```
 
 > **NEVER commit `.env` to Git.** It is listed in `.gitignore`.
@@ -142,7 +145,8 @@ pytest tests/ -v
 | `APP_ENV` | No | `development` (default) |
 | `DATABASE_URL` | No | SQLite path, default `sqlite:///./agentpay_guard.db` |
 | `FRONTEND_ORIGIN` | No | CORS origin for frontend, default `http://localhost:5173` |
-| `AI_PROVIDER` | No | `gemini`, `openai`, or `none` (fallback) |
+| `ADMIN_TOKEN` | No* | Required outside `development` for `PUT /api/policy` and `POST /api/policy/reset` |
+| `AI_PROVIDER` | No | `openai`, or `none` (fallback) |
 | `AI_API_KEY` | No | Provider API key — backend only, never in frontend |
 | `AI_MODEL` | No | Model name for the selected provider |
 | `PAYPAL_MODE` | Yes | Must be `sandbox` for this project |
@@ -152,6 +156,16 @@ pytest tests/ -v
 | `PAYPAL_CURRENCY` | No | `USD` |
 
 *Required for PayPal checkout flow. Without them, the UI shows a clear "PayPal unconfigured" message; all non-payment features still work.
+*`ADMIN_TOKEN` is verified using constant-time `secrets.compare_digest` via the `X-Admin-Token` header. Allowed without a token only when `APP_ENV=development`.
+
+---
+
+## Concurrency & Budget Safety
+
+AgentPay Guard provides robust multi-order safety:
+- **Budget Reservation:** When `POST /api/payments/create-order` evaluates spending policy, it counts not only settled transactions but also active in-flight orders (`pending`, `approved`, `capturing`, `needs_verification` created within the last 30 minutes via `reserved_cents()`). This prevents concurrent requests from exceeding the total budget.
+- **Atomic Capture Claim:** In `capture_payment_order()`, the system atomically claims the payment record (`UPDATE payments SET status='capturing' WHERE status IN ('pending', 'approved')`). If another capture attempt is in progress, the second request immediately receives `409 Conflict`.
+- **Pre-Capture Budget Recheck & Atomic Deduction:** The backend verifies that the budget remains sufficient before calling PayPal, and updates `successful_spend_cents` with an atomic SQL expression. On `ORDER_NOT_APPROVED`, the status safely reverts to `pending` so the buyer can complete checkout.
 
 ---
 
@@ -168,7 +182,7 @@ pytest tests/ -v
 
 | Tool | Role |
 |---|---|
-| Gemini / OpenAI (optional) | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. The model has no authority over price, merchant, policy outcome, or payment status. |
+| OpenAI (optional) | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. The model has no authority over price, merchant, policy outcome, or payment status. |
 | Deterministic fallback | Keyword-matching engine that selects a catalogue product when no AI key is configured. Clearly labelled "Demo Fallback Mode" — never misrepresented as an LLM response. |
 
 ---
@@ -178,10 +192,20 @@ pytest tests/ -v
 | Scenario | Setup | Expected Result |
 |---|---|---|
 | A — Allowed purchase | Budget $100, cap $40, approved merchant, product $30 | ALLOWED → user approves → PayPal Sandbox checkout → backend verifies capture |
-| B — Over per-order limit | Same policy, product $55 | BLOCKED: `MAX_ORDER_AMOUNT_EXCEEDED` |
-| C — Merchant not approved | Product $25, unapproved merchant | BLOCKED: `MERCHANT_NOT_APPROVED` |
+| B — Over per-order limit (Smart Alternatives) | Same policy, user requests $79.99 mechanical keyboard | BLOCKED: `MAX_ORDER_AMOUNT_EXCEEDED` → Agent suggests in-policy alternatives (e.g. $29.99 mouse / $34.99 desk lamp) → user can click "Review this instead" and proceed to PayPal checkout |
+| C — Merchant not approved | Product $25, unapproved merchant | BLOCKED: `MERCHANT_NOT_APPROVED` → In-policy alternatives suggested from approved allowlist |
 | D — Budget exhausted | $80 spent, $30 product proposed | BLOCKED: `TOTAL_BUDGET_EXCEEDED` |
 | E — Payment cancelled | User cancels PayPal checkout | Status: `cancelled` — budget unchanged |
+
+---
+
+## Smart Alternatives
+
+When a user's request results in a **BLOCKED** primary recommendation (such as exceeding the per-order limit or targeting an unapproved seller):
+1. **Plain-English Explanation:** The backend generates an easy-to-understand breakdown of why the item violated policy (`block_explanation`).
+2. **Safe Suggestions:** The AI suggests candidate catalogue products, and the deterministic policy engine verifies each candidate against active limits. Up to 2 verified **ALLOWED** alternatives are returned.
+3. **Seamless Transition:** Each alternative is persisted with its own proposal ID. In the UI, users can simply click **"Review this instead →"** to make the alternative their active proposal, unlocking the standard "Approve & Pay" PayPal Sandbox checkout flow.
+4. **Strict Trust Boundary Preserved:** The AI only suggests product IDs and rationales. Prices, merchant allowlists, and policy decisions come strictly from the server-side database and policy engine. Any unknown product ID is discarded.
 
 ---
 

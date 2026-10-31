@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./agentpay_guard.db"
     frontend_origin: str = "http://localhost:5173"
+    admin_token: str = ""
 
     # AI
     ai_provider: str = "none"          # "openai" | "gemini" | "none"

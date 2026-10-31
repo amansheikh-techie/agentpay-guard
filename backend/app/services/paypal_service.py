@@ -115,6 +115,7 @@ def create_order(
             "brand_name": "AgentPay Guard Sandbox",
             "landing_page": "NO_PREFERENCE",
             "user_action": "PAY_NOW",
+            "shipping_preference": "NO_SHIPPING",
             "return_url": return_url,
             "cancel_url": cancel_url,
         },
@@ -141,12 +142,38 @@ def create_order(
 def capture_order(paypal_order_id: str, request_id: str | None = None) -> dict[str, Any]:
     """
     Capture an approved PayPal order.
+    Pre-checks order status to provide clear, actionable errors.
     Idempotent via PayPal-Request-Id.
     """
     settings = get_settings()
     token = get_access_token()
-    req_id = request_id or f"cap_{uuid.uuid4()}"
 
+    # ── Pre-flight: verify the order is in APPROVED state ──────────────
+    order_details = get_order_details(paypal_order_id)
+    order_status = order_details.get("status", "UNKNOWN")
+
+    if order_status == "COMPLETED":
+        # Already captured — return existing data for idempotency
+        logger.info("Order %s is already COMPLETED; returning existing data.", paypal_order_id)
+        return order_details
+
+    if order_status != "APPROVED":
+        logger.warning(
+            "Cannot capture order %s: status is '%s', expected 'APPROVED'. "
+            "The buyer must complete approval at PayPal before capture.",
+            paypal_order_id, order_status,
+        )
+        raise PayPalError(
+            f"Order cannot be captured because its status is '{order_status}'. "
+            f"The buyer must first complete checkout approval at PayPal Sandbox. "
+            f"Please click the PayPal approval link, log in with a Sandbox buyer "
+            f"account, and approve the payment before clicking Capture.",
+            status_code=422,
+            details={"issue": "ORDER_NOT_APPROVED", "order_status": order_status},
+        )
+
+    # ── Capture the approved order ─────────────────────────────────────
+    req_id = request_id or f"cap_{uuid.uuid4()}"
     url = f"{settings.paypal_base_url.rstrip('/')}/v2/checkout/orders/{paypal_order_id}/capture"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -161,12 +188,24 @@ def capture_order(paypal_order_id: str, request_id: str | None = None) -> dict[s
             if resp.status_code not in (200, 201):
                 logger.error("PayPal capture_order returned status %s", resp.status_code)
                 error_msg = "PayPal capture failed."
+                details = {}
                 try:
                     data = resp.json()
                     error_msg = data.get("message", error_msg)
+                    # Extract the specific PayPal issue code for diagnostics
+                    issues = data.get("details", [])
+                    if issues:
+                        issue_code = issues[0].get("issue", "")
+                        issue_desc = issues[0].get("description", "")
+                        if issue_code:
+                            error_msg = f"{error_msg} [{issue_code}]: {issue_desc}"
+                            details = {"issue": issue_code, "description": issue_desc}
+                    debug_id = data.get("debug_id", "")
+                    if debug_id:
+                        details["debug_id"] = debug_id
                 except Exception:
                     pass
-                raise PayPalError(error_msg, status_code=resp.status_code)
+                raise PayPalError(error_msg, status_code=resp.status_code, details=details)
             return resp.json()
     except httpx.RequestError as exc:
         logger.error("PayPal network error during capture_order: %s", exc)

@@ -3,6 +3,10 @@ tests/test_health.py — Phase 1 health endpoint tests.
 """
 
 
+from unittest.mock import patch
+from app.config import Settings
+
+
 def test_health_returns_ok(client):
     response = client.get("/api/health")
     assert response.status_code == 200
@@ -11,17 +15,19 @@ def test_health_returns_ok(client):
 
 
 def test_health_shows_fallback_when_ai_unconfigured(client):
-    response = client.get("/api/health")
-    body = response.json()
-    # With empty AI_API_KEY the provider must default to fallback
-    assert body["ai_configured"] is False
+    with patch("app.routers.health.get_settings") as mock_settings:
+        mock_settings.return_value = Settings(ai_api_key="", ai_provider="none")
+        response = client.get("/api/health")
+        body = response.json()
+        assert body["ai_configured"] is False
 
 
 def test_health_shows_paypal_unconfigured(client):
-    response = client.get("/api/health")
-    body = response.json()
-    # No PayPal credentials in test env
-    assert body["paypal_configured"] is False
+    with patch("app.routers.health.get_settings") as mock_settings:
+        mock_settings.return_value = Settings(paypal_client_id="", paypal_client_secret="")
+        response = client.get("/api/health")
+        body = response.json()
+        assert body["paypal_configured"] is False
 
 
 def test_health_contains_sandbox_note(client):

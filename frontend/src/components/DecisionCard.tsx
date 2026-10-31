@@ -1,5 +1,5 @@
 // components/DecisionCard.tsx — Displays AI proposal, authoritative product details, policy verdict & PayPal Sandbox checkout
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ClipboardList,
   ShieldX,
@@ -19,9 +19,11 @@ import { createOrder, captureOrder } from '../api/client';
 interface Props {
   proposal: Proposal | null;
   onPaymentSuccess?: () => void;
+  onSelectAlternative?: (alt: Proposal) => void;
 }
 
-export default function DecisionCard({ proposal, onPaymentSuccess }: Props) {
+export default function DecisionCard({ proposal: initialProposal, onPaymentSuccess, onSelectAlternative }: Props) {
+  const [currentProposal, setCurrentProposal] = useState<Proposal | null>(initialProposal);
   const [creatingOrder, setCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<{
@@ -29,8 +31,43 @@ export default function DecisionCard({ proposal, onPaymentSuccess }: Props) {
     paypal_order_id: string;
     approve_url: string;
   } | null>(null);
+  const [buyerApproved, setBuyerApproved] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [captureSuccess, setCaptureSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentProposal(initialProposal);
+    setCreatedOrder(null);
+    setOrderError(null);
+    setCaptureSuccess(null);
+  }, [initialProposal]);
+
+  const proposal = currentProposal;
+
+  // On mount or when the page regains focus, check URL params for PayPal
+  // return. PayPal redirects back with ?payment_status=approved&payment_id=...
+  // after the buyer completes the approval flow.
+  useEffect(() => {
+    const checkPayPalReturn = () => {
+      const params = new URLSearchParams(window.location.search);
+      const paymentStatus = params.get('payment_status');
+      if (paymentStatus === 'approved') {
+        setBuyerApproved(true);
+        // Clean up the URL without reload
+        const url = new URL(window.location.href);
+        url.searchParams.delete('payment_status');
+        url.searchParams.delete('payment_id');
+        window.history.replaceState({}, '', url.pathname);
+      }
+    };
+
+    checkPayPalReturn();
+
+    // Also recheck when the window regains focus (buyer returns from PayPal tab)
+    const handleFocus = () => checkPayPalReturn();
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
 
   if (!proposal) {
     return (
@@ -56,7 +93,7 @@ export default function DecisionCard({ proposal, onPaymentSuccess }: Props) {
 
   const isAllowed = proposal.policy_decision === 'ALLOWED';
   const product = proposal.product;
-  const priceFormatted = product ? `$${(product.price_cents / 100).toFixed(2)}` : '—';
+  const priceFormatted = product ? `$${(product.price_cents / 100).toFixed(2)} ${product.currency}` : '—';
 
   const handleApproveAndPay = async () => {
     if (!proposal || !isAllowed || creatingOrder) return;
@@ -88,6 +125,16 @@ export default function DecisionCard({ proposal, onPaymentSuccess }: Props) {
       setOrderError((err as Error).message || 'Failed to capture PayPal order.');
     } finally {
       setCapturing(false);
+    }
+  };
+
+  const handleChooseAlternative = (alt: Proposal) => {
+    setCurrentProposal(alt);
+    setCreatedOrder(null);
+    setOrderError(null);
+    setCaptureSuccess(null);
+    if (onSelectAlternative) {
+      onSelectAlternative(alt);
     }
   };
 
@@ -264,6 +311,20 @@ export default function DecisionCard({ proposal, onPaymentSuccess }: Props) {
                 )}
 
                 <div style={{ borderTop: '1px dashed var(--border-subtle)', paddingTop: '0.625rem' }}>
+                  {!buyerApproved && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                      padding: '0.5rem 0.75rem', marginBottom: '0.5rem',
+                      background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)',
+                      borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', color: '#f59e0b',
+                    }}>
+                      <AlertCircle size={14} />
+                      <span>
+                        <strong>Step 1:</strong> Click the link above to approve payment in PayPal Sandbox.
+                        <strong> Step 2:</strong> After approval, return here and click Capture below.
+                      </span>
+                    </div>
+                  )}
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm btn-full"
@@ -311,6 +372,97 @@ export default function DecisionCard({ proposal, onPaymentSuccess }: Props) {
             <div style={{ marginTop: '0.875rem', padding: '0.5rem 0.75rem', background: 'rgba(239, 68, 68, 0.12)', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600 }}>
               ⛔ Checkout Disabled: The backend strictly forbids creating a PayPal order for a blocked proposal.
             </div>
+
+            {/* Plain-English block explanation */}
+            {proposal.block_explanation && (
+              <div style={{
+                marginTop: '0.875rem',
+                padding: '0.75rem',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: '0.82rem',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.45,
+              }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                  Why this was blocked:
+                </div>
+                <div>{proposal.block_explanation}</div>
+              </div>
+            )}
+
+            {/* Smart Alternatives */}
+            {proposal.alternatives && proposal.alternatives.length > 0 && (
+              <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <ShieldCheck size={18} color="var(--success)" />
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Agent suggests these within policy:
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+                  {proposal.alternatives.map((alt) => {
+                    const altProd = alt.product;
+                    const altPriceFormatted = altProd
+                      ? `$${(altProd.price_cents / 100).toFixed(2)} ${altProd.currency}`
+                      : '—';
+
+                    return (
+                      <div
+                        key={alt.id}
+                        style={{
+                          padding: '0.75rem',
+                          background: 'var(--bg-surface)',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1px solid rgba(52, 211, 153, 0.3)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.4rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                          <div>
+                            <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                              {altProd ? altProd.name : alt.selected_product_id}
+                            </div>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                              Merchant: <strong>{altProd?.merchant_name || 'Approved'}</strong> ({altProd?.merchant_id})
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--accent)' }}>
+                              {altPriceFormatted}
+                            </div>
+                            <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '3px', background: 'rgba(52, 211, 153, 0.15)', color: 'var(--success)', fontWeight: 600 }}>
+                              IN POLICY
+                            </span>
+                          </div>
+                        </div>
+
+                        {alt.rationale && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.2rem' }}>
+                            {alt.rationale}
+                          </div>
+                        )}
+
+                        <div style={{ marginTop: '0.4rem', paddingTop: '0.4rem', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleChooseAlternative(alt)}
+                            style={{ fontSize: '0.75rem', gap: '0.35rem', padding: '0.3rem 0.65rem' }}
+                          >
+                            Review this instead →
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

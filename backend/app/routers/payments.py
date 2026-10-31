@@ -17,8 +17,10 @@ Security Rules:
   7. Cancelled/failed orders never increment successful_spend_cents.
 """
 from __future__ import annotations
+from datetime import datetime, timedelta, timezone
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -40,6 +42,25 @@ from app.services.policy_engine import (
 )
 
 router = APIRouter()
+
+IN_FLIGHT_STATUSES = ("pending", "approved", "capturing", "needs_verification")
+
+
+def reserved_cents(db: Session, window_minutes: int = 30) -> int:
+    """
+    Compute total cents reserved by in-flight orders created within the last `window_minutes`.
+    Counts payments in pending, approved, capturing, or needs_verification statuses.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+    total = (
+        db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
+        .filter(
+            Payment.status.in_(IN_FLIGHT_STATUSES),
+            Payment.created_at >= cutoff,
+        )
+        .scalar()
+    )
+    return int(total or 0)
 
 
 @router.post("/create-order", response_model=CreateOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -76,6 +97,7 @@ def create_payment_order(
         )
 
     # 4. Fetch current policy and perform real-time live re-evaluation
+    # Incorporates in-flight reserved budget to prevent concurrent overspending
     policy = db.query(Policy).first()
     if not policy:
         raise HTTPException(
@@ -83,13 +105,16 @@ def create_payment_order(
             detail="Spending policy is not configured.",
         )
 
+    in_flight_spend = reserved_cents(db, window_minutes=30)
+    effective_spend_cents = policy.successful_spend_cents + in_flight_spend
+
     policy_snap = PolicySnapshot(
         total_budget_cents=policy.total_budget_cents,
         max_per_order_cents=policy.max_per_order_cents,
         currency=policy.currency,
         approved_merchant_ids=policy.approved_merchant_ids,
         require_approval=policy.require_approval,
-        successful_spend_cents=policy.successful_spend_cents,
+        successful_spend_cents=effective_spend_cents,
     )
     product_snap = ProductSnapshot(
         id=product.id,
@@ -103,6 +128,13 @@ def create_payment_order(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Live policy re-evaluation blocked checkout: {', '.join(recheck_result.explanations)}",
+        )
+
+    # 4b. Verify currency consistency
+    if product.currency.upper() != settings.paypal_currency.upper():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Product currency '{product.currency}' does not match configured PayPal currency '{settings.paypal_currency}'.",
         )
 
     # 5. Check PayPal configuration
@@ -200,10 +232,73 @@ def capture_payment_order(
     if payment.status == "captured":
         return payment
 
-    # 3. Call PayPal Capture API
+    # 2b. Atomic claim: Claim payment by moving status to 'capturing'
+    claim_count = (
+        db.query(Payment)
+        .filter(
+            Payment.id == payment.id,
+            Payment.status.in_(["pending", "approved"]),
+        )
+        .update({"status": "capturing"}, synchronize_session="fetch")
+    )
+    db.commit()
+
+    if claim_count == 0:
+        db.refresh(payment)
+        if payment.status == "captured":
+            return payment
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Payment order is currently being captured (status: '{payment.status}').",
+        )
+
+    # 2c. Recheck remaining budget before calling PayPal
+    policy = db.query(Policy).first()
+    if not policy:
+        payment.status = "pending"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Spending policy is not configured.",
+        )
+
+    remaining_budget = policy.total_budget_cents - policy.successful_spend_cents
+    if payment.amount_cents > remaining_budget:
+        payment.status = "pending"
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Remaining budget ({remaining_budget} cents) is insufficient for this payment ({payment.amount_cents} cents).",
+        )
+
+    # 3. Call PayPal Capture API (includes pre-flight order status check)
     try:
-        capture_data = paypal_service.capture_order(payload.paypal_order_id)
+        capture_data = paypal_service.capture_order(
+            payload.paypal_order_id,
+            request_id=f"cap_{payment.id}",
+        )
     except PayPalError as err:
+        issue_code = err.details.get("issue", "") if isinstance(err.details, dict) else ""
+        if issue_code == "ORDER_NOT_APPROVED":
+            # Reset status to 'pending' on ORDER_NOT_APPROVED so the buyer can still approve
+            payment.status = "pending"
+            db.commit()
+            audit_service.log(
+                db=db,
+                event_type="PAYMENT_AWAITING_APPROVAL",
+                details={
+                    "error": err.message,
+                    "paypal_order_id": payload.paypal_order_id,
+                    "issue": issue_code,
+                },
+                proposal_id=payment.proposal_id,
+                payment_id=payment.id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=err.message,
+            )
+
         payment.status = "failed"
         db.commit()
         audit_service.log(
@@ -276,12 +371,15 @@ def capture_payment_order(
     payment.status = "captured"
     payment.paypal_capture_id = capture_id
 
-    policy = db.query(Policy).first()
-    if policy:
-        policy.successful_spend_cents += payment.amount_cents
+    # Deduct budget using an atomic SQL UPDATE expression
+    db.query(Policy).filter(Policy.id == policy.id).update(
+        {Policy.successful_spend_cents: Policy.successful_spend_cents + payment.amount_cents},
+        synchronize_session="fetch",
+    )
 
     db.commit()
     db.refresh(payment)
+    db.refresh(policy)
 
     # 7. Immutable audit logging
     audit_service.log(

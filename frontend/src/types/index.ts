@@ -52,6 +52,8 @@ export interface Proposal {
   decision_reasons: string[];
   decision_explanations: string[];
   ai_mode: 'live' | 'fallback';
+  block_explanation?: string | null;
+  alternatives?: Proposal[];
   created_at: string;
 }
 
