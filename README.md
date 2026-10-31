@@ -38,7 +38,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18 + Vite + TypeScript |
+| Frontend | React 19 + Vite + TypeScript |
 | Backend | Python 3.11 + FastAPI + Uvicorn |
 | Persistence | SQLite + SQLAlchemy 2 |
 | Validation | Pydantic v2 |
@@ -206,6 +206,15 @@ When a user's request results in a **BLOCKED** primary recommendation (such as e
 2. **Safe Suggestions:** The AI suggests candidate catalogue products, and the deterministic policy engine verifies each candidate against active limits. Up to 2 verified **ALLOWED** alternatives are returned.
 3. **Seamless Transition:** Each alternative is persisted with its own proposal ID. In the UI, users can simply click **"Review this instead →"** to make the alternative their active proposal, unlocking the standard "Approve & Pay" PayPal Sandbox checkout flow.
 4. **Strict Trust Boundary Preserved:** The AI only suggests product IDs and rationales. Prices, merchant allowlists, and policy decisions come strictly from the server-side database and policy engine. Any unknown product ID is discarded.
+
+---
+
+## Deployment Notes
+
+- Set `APP_ENV=production` when deploying.
+- Configure a strong `ADMIN_TOKEN` in the environment; all policy modification endpoints (`PUT /api/policy` and `POST /api/policy/reset`) enforce `X-Admin-Token` authentication outside development mode.
+- Set `FRONTEND_ORIGIN` to match your deployed web client URL to configure CORS properly.
+- Ensure PayPal credentials and AI API keys are provided only to the server via environment variables and never exposed to client-side bundles.
 
 ---
 
