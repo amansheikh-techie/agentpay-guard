@@ -166,6 +166,7 @@ pytest tests/ -v
 AgentPay Guard provides robust multi-order safety:
 
 - **Budget Reservation:** When `POST /api/payments/create-order` evaluates spending policy, it counts not only settled transactions but also active in-flight orders (`pending`, `approved`, `capturing`, `needs_verification` created within the last 30 minutes via `reserved_cents()`). This prevents concurrent requests from exceeding the total budget.
+- **Daily & Monthly Limit Boundaries:** Spending limits operate strictly on **UTC** calendar boundaries. Daily limits evaluate from `00:00:00 UTC` of the current day, and monthly limits evaluate from `00:00:00 UTC` on day 1 of the current month. Evaluations combine captured spend with active in-flight reservations created within the 30-minute window, ensuring two concurrent orders cannot bypass daily or monthly limits.
 - **Atomic Capture Claim:** In `capture_payment_order()`, the system atomically claims the payment record (`UPDATE payments SET status='capturing' WHERE status IN ('pending', 'approved')`). If another capture attempt is in progress, the second request immediately receives `409 Conflict`.
 - **Pre-Capture Budget Recheck & Atomic Deduction:** The backend verifies that the budget remains sufficient before calling PayPal, and updates `successful_spend_cents` with an atomic SQL expression. On `ORDER_NOT_APPROVED`, the status safely reverts to `pending` so the buyer can complete checkout.
 

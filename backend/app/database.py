@@ -25,10 +25,10 @@ def run_sqlite_migrations(target_engine):
     Idempotent, non-destructive schema migrations for SQLite without requiring Alembic.
     Inspects existing tables and safely adds new columns if they do not yet exist.
     """
-    inspector = inspect(target_engine)
-    tables = inspector.get_table_names()
-
     with target_engine.begin() as conn:
+        inspector = inspect(conn)
+        tables = set(inspector.get_table_names())
+
         if "policies" in tables:
             cols = {c["name"] for c in inspector.get_columns("policies")}
             if "daily_limit_cents" not in cols:

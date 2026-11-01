@@ -12,6 +12,7 @@ Trust Boundaries:
   5. The result (ALLOWED or BLOCKED) and explanations are recorded in proposals and audit_events.
 """
 import re
+from typing import Optional
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -26,12 +27,12 @@ from app.services.policy_engine import (
     PolicyResult,
     evaluate_proposal,
 )
-from app.routers.payments import daily_spent_cents, monthly_spent_cents
+from app.routers.payments import daily_spent_cents, monthly_spent_cents, reserved_cents
 
 router = APIRouter()
 
 
-def _extract_requirements(text: str) -> ExtractedRequirements:
+def _keyword_extract_requirements(text: str) -> ExtractedRequirements:
     cat = None
     tl = text.lower()
     if any(w in tl for w in ["mouse", "mice", "keyboard", "hub", "webcam"]):
@@ -65,6 +66,22 @@ def _extract_requirements(text: str) -> ExtractedRequirements:
         features.append("USB-C / USB")
 
     return ExtractedRequirements(category=cat, max_price_cents=max_p, features=features)
+
+
+def _extract_requirements(
+    text: str,
+    valid_categories: Optional[list[str]] = None,
+    ai_mode: str = "fallback",
+) -> ExtractedRequirements:
+    if ai_mode == "live" and valid_categories:
+        ai_extracted = ai_service.extract_requirements_from_ai(text, valid_categories)
+        if ai_extracted:
+            return ExtractedRequirements(
+                category=ai_extracted.get("category"),
+                max_price_cents=ai_extracted.get("max_price_cents"),
+                features=ai_extracted.get("features", []),
+            )
+    return _keyword_extract_requirements(text)
 
 
 @router.post("/propose", response_model=ProposalRead, status_code=status.HTTP_201_CREATED)
@@ -116,8 +133,14 @@ def propose_purchase(
             detail="Spending policy is not configured.",
         )
 
-    extracted_reqs = _extract_requirements(payload.user_request)
+    valid_cats = list({p.category for p in products if p.category}) or ["peripherals", "office", "audio", "gadgets"]
+    extracted_reqs = _extract_requirements(
+        payload.user_request,
+        valid_categories=valid_cats,
+        ai_mode=ai_result.ai_mode,
+    )
 
+    effective_spend_cents = policy.successful_spend_cents + reserved_cents(db)
     policy_snap = PolicySnapshot(
         total_budget_cents=policy.total_budget_cents,
         max_per_order_cents=policy.max_per_order_cents,
@@ -128,7 +151,7 @@ def propose_purchase(
         blocked_categories=policy.blocked_categories,
         require_approval=policy.require_approval,
         agent_enabled=policy.agent_enabled,
-        successful_spend_cents=policy.successful_spend_cents,
+        successful_spend_cents=effective_spend_cents,
         daily_spend_cents=daily_spent_cents(db),
         monthly_spend_cents=monthly_spent_cents(db),
     )

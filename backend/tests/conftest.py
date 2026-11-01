@@ -61,6 +61,11 @@ def clean_test_db(setup_tables):
             policy.approved_merchant_ids = DEFAULT_POLICY["approved_merchant_ids"]
             policy.require_approval = DEFAULT_POLICY["require_approval"]
             policy.successful_spend_cents = 0
+            policy.daily_limit_cents = 0
+            policy.monthly_limit_cents = 0
+            policy.blocked_categories = []
+            policy.agent_enabled = True
+            policy.policy_version = 1
         db.commit()
     finally:
         db.close()

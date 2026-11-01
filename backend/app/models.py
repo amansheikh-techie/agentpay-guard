@@ -6,6 +6,7 @@ IEEE-754 floating-point errors in monetary calculations.
 """
 import json
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import (
     Boolean, Column, Integer, String, Text, DateTime, ForeignKey
@@ -138,11 +139,22 @@ class Payment(Base):
 
     @property
     def approval_binding(self) -> dict:
-        return json.loads(self._approval_binding)
+        if not self._approval_binding or self._approval_binding.strip() in ("", "null", "None"):
+            return {}
+        try:
+            val = json.loads(self._approval_binding)
+            return val if isinstance(val, dict) else {}
+        except Exception:
+            return {}
 
     @approval_binding.setter
-    def approval_binding(self, value: dict):
-        self._approval_binding = json.dumps(value)
+    def approval_binding(self, value: Any):
+        if value is None:
+            self._approval_binding = "{}"
+        elif isinstance(value, str):
+            self._approval_binding = value
+        else:
+            self._approval_binding = json.dumps(value)
 
 
 class AuditEvent(Base):

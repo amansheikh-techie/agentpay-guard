@@ -277,6 +277,105 @@ def generate_block_explanation(
     return _fallback_explanation()
 
 
+def validate_extracted_requirements(data: Any, valid_categories: set[str]) -> Optional[dict[str, Any]]:
+    """
+    Validate AI requirements strictly:
+    - category must be one of the catalogue categories (else None/null)
+    - max_price_cents a positive integer (else None/null)
+    - features at most 5 short strings
+    Returns None if data is not a dict.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    raw_cat = data.get("category")
+    cat = None
+    if raw_cat and isinstance(raw_cat, str):
+        cleaned_cat = raw_cat.strip().lower()
+        if cleaned_cat in {c.lower() for c in valid_categories}:
+            cat = cleaned_cat
+
+    raw_price = data.get("max_price_cents")
+    max_price = None
+    if raw_price is not None:
+        try:
+            val = int(raw_price)
+            if val > 0:
+                max_price = val
+        except (ValueError, TypeError):
+            max_price = None
+
+    raw_features = data.get("features")
+    features: list[str] = []
+    if isinstance(raw_features, list):
+        for f in raw_features:
+            if isinstance(f, str) and f.strip():
+                features.append(f.strip()[:60])
+            if len(features) >= 5:
+                break
+
+    return {
+        "category": cat,
+        "max_price_cents": max_price,
+        "features": features,
+    }
+
+
+def extract_requirements_from_ai(
+    user_request: str,
+    valid_categories: list[str],
+) -> Optional[dict[str, Any]]:
+    """
+    In live AI mode, ask the model for JSON {category, max_price_cents, features}.
+    Validates strictly: category in valid_categories, max_price_cents > 0, at most 5 features.
+    If the AI call fails or returns invalid JSON, returns None.
+    """
+    settings = get_settings()
+    if not settings.ai_configured or settings.ai_provider != "openai":
+        return None
+
+    try:
+        import httpx
+        valid_cats_str = ", ".join(valid_categories)
+        system_prompt = (
+            "You are a shopping requirement parser for AgentPay Guard.\n"
+            f"The valid product categories are: {valid_cats_str}.\n"
+            "Extract the user request into JSON format adhering strictly to this schema:\n"
+            "{\n"
+            '  "category": "<one of valid categories, or null>",\n'
+            '  "max_price_cents": <positive integer price in cents or null>,\n'
+            '  "features": ["<feature 1>", "<feature 2>"]\n'
+            "}\n"
+            "Rules:\n"
+            "- category must match one of the valid categories exactly, or be null.\n"
+            "- max_price_cents must be an integer in cents (e.g. $40 -> 4000), or null.\n"
+            "- features must be at most 5 short strings describing specific desired features."
+        )
+        headers = {
+            "Authorization": f"Bearer {settings.ai_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": settings.ai_model or "gpt-4o-mini",
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"User request: {user_request}"},
+            ],
+            "temperature": 0.0,
+        }
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            return validate_extracted_requirements(parsed, set(c.lower() for c in valid_categories))
+    except Exception as exc:
+        logger.warning("AI requirement extraction failed (%s). Falling back to keyword matcher.", exc)
+        return None
+
+
 def generate_recommendation(
     user_request: str,
     catalogue: list[dict[str, Any]]

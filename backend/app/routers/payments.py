@@ -47,51 +47,72 @@ router = APIRouter()
 IN_FLIGHT_STATUSES = ("pending", "approved", "capturing", "needs_verification")
 
 
-def reserved_cents(db: Session, window_minutes: int = 30) -> int:
+def reserved_cents(db: Session, window_minutes: int = 30, exclude_payment_id: Optional[str] = None) -> int:
     """
     Compute total cents reserved by in-flight orders created within the last `window_minutes`.
     Counts payments in pending, approved, capturing, or needs_verification statuses.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
-    total = (
+    query = (
         db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
         .filter(
             Payment.status.in_(IN_FLIGHT_STATUSES),
             Payment.created_at >= cutoff,
         )
-        .scalar()
     )
-    return int(total or 0)
+    if exclude_payment_id:
+        query = query.filter(Payment.id != exclude_payment_id)
+    return int(query.scalar() or 0)
 
 
-def daily_spent_cents(db: Session) -> int:
-    """Compute total cents captured in the current UTC calendar day."""
+def daily_spent_cents(db: Session, window_minutes: int = 30, exclude_payment_id: Optional[str] = None) -> int:
+    """
+    Compute total cents captured in the current UTC calendar day
+    plus active in-flight reserved orders within the window for the current day.
+    """
     now = datetime.now(timezone.utc)
     start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    total = (
-        db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
-        .filter(
-            Payment.status == "captured",
-            Payment.created_at >= start_of_day,
-        )
-        .scalar()
+    cutoff = now - timedelta(minutes=window_minutes)
+
+    cap_query = db.query(func.coalesce(func.sum(Payment.amount_cents), 0)).filter(
+        Payment.status == "captured",
+        Payment.created_at >= start_of_day,
     )
-    return int(total or 0)
+    res_query = db.query(func.coalesce(func.sum(Payment.amount_cents), 0)).filter(
+        Payment.status.in_(IN_FLIGHT_STATUSES),
+        Payment.created_at >= cutoff,
+        Payment.created_at >= start_of_day,
+    )
+    if exclude_payment_id:
+        cap_query = cap_query.filter(Payment.id != exclude_payment_id)
+        res_query = res_query.filter(Payment.id != exclude_payment_id)
+
+    return int(cap_query.scalar() or 0) + int(res_query.scalar() or 0)
 
 
-def monthly_spent_cents(db: Session) -> int:
-    """Compute total cents captured in the current UTC calendar month."""
+def monthly_spent_cents(db: Session, window_minutes: int = 30, exclude_payment_id: Optional[str] = None) -> int:
+    """
+    Compute total cents captured in the current UTC calendar month
+    plus active in-flight reserved orders within the window for the current month.
+    """
     now = datetime.now(timezone.utc)
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    total = (
-        db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
-        .filter(
-            Payment.status == "captured",
-            Payment.created_at >= start_of_month,
-        )
-        .scalar()
+    cutoff = now - timedelta(minutes=window_minutes)
+
+    cap_query = db.query(func.coalesce(func.sum(Payment.amount_cents), 0)).filter(
+        Payment.status == "captured",
+        Payment.created_at >= start_of_month,
     )
-    return int(total or 0)
+    res_query = db.query(func.coalesce(func.sum(Payment.amount_cents), 0)).filter(
+        Payment.status.in_(IN_FLIGHT_STATUSES),
+        Payment.created_at >= cutoff,
+        Payment.created_at >= start_of_month,
+    )
+    if exclude_payment_id:
+        cap_query = cap_query.filter(Payment.id != exclude_payment_id)
+        res_query = res_query.filter(Payment.id != exclude_payment_id)
+
+    return int(cap_query.scalar() or 0) + int(res_query.scalar() or 0)
 
 
 @router.post("/create-order", response_model=CreateOrderResponse, status_code=status.HTTP_201_CREATED)
@@ -213,12 +234,16 @@ def create_payment_order(
     )
 
     # 7. Record Payment
-    binding = payload.approval_binding or {
+    binding = {
+        "proposal_id": proposal.id,
         "product_id": product.id,
-        "price_cents": product.price_cents,
         "merchant_id": product.merchant_id,
+        "price_cents": product.price_cents,
+        "currency": product.currency,
         "policy_version": policy.policy_version,
     }
+    if payload.approval_binding and isinstance(payload.approval_binding, dict):
+        binding.update(payload.approval_binding)
     payment = Payment(
         id=payment_id,
         proposal_id=proposal.id,
@@ -266,6 +291,7 @@ def capture_payment_order(
     Idempotent: Duplicate calls for an already-captured order do not duplicate budget deductions.
     """
     # 1. Fetch Payment record
+    settings = get_settings()
     payment = db.query(Payment).filter(Payment.paypal_order_id == payload.paypal_order_id).first()
     if not payment:
         raise HTTPException(
@@ -273,20 +299,132 @@ def capture_payment_order(
             detail=f"Payment for PayPal order '{payload.paypal_order_id}' was not found.",
         )
 
-    # 1b. Verify approval binding integrity
-    if payment.approval_binding:
-        binding = payment.approval_binding
-        if binding.get("price_cents") and binding["price_cents"] != payment.amount_cents:
-            payment.status = "needs_verification"
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Security alert: Purchase amount changed between approval and capture (APPROVAL_MISMATCH).",
-            )
-
-    # 2. Idempotency protection: If already captured, return existing state without deducting again
+    # 1b. Idempotency protection: If already captured, return existing state without deducting again
     if payment.status == "captured":
         return payment
+
+    # Record status prior to any capture processing
+    prev_status = payment.status
+
+    # 1c. Verify approval binding integrity BEFORE claiming payment
+    binding = payment.approval_binding
+    if binding and isinstance(binding, dict) and any(binding.values()):
+        product_id = binding.get("product_id")
+        current_product = db.query(Product).filter(Product.id == product_id).first() if product_id else None
+        current_policy = db.query(Policy).first()
+        proposal = db.query(Proposal).filter(Proposal.id == payment.proposal_id).first()
+
+        diffs = {}
+        if not current_product:
+            diffs["product_id"] = {"binding": product_id, "current": None}
+        else:
+            # product_id equals proposal's selected product
+            if proposal and proposal.selected_product_id != current_product.id:
+                diffs["proposal_selected_product"] = {
+                    "proposal": proposal.selected_product_id,
+                    "current_product": current_product.id,
+                }
+            # price_cents equals current product price AND payment.amount_cents
+            expected_price = binding.get("price_cents")
+            if (
+                expected_price != current_product.price_cents
+                or expected_price != payment.amount_cents
+                or payment.amount_cents != current_product.price_cents
+            ):
+                diffs["price_cents"] = {
+                    "binding": expected_price,
+                    "current_product": current_product.price_cents,
+                    "payment": payment.amount_cents,
+                }
+            # merchant_id equals current product merchant
+            expected_merchant = binding.get("merchant_id")
+            if expected_merchant != current_product.merchant_id:
+                diffs["merchant_id"] = {
+                    "binding": expected_merchant,
+                    "current_product": current_product.merchant_id,
+                }
+            # currency equals payment.currency and configured PayPal currency
+            expected_currency = binding.get("currency")
+            if (
+                (expected_currency and expected_currency.upper() != payment.currency.upper())
+                or payment.currency.upper() != settings.paypal_currency.upper()
+                or (expected_currency and expected_currency.upper() != settings.paypal_currency.upper())
+            ):
+                diffs["currency"] = {
+                    "binding": expected_currency,
+                    "payment": payment.currency,
+                    "configured": settings.paypal_currency,
+                }
+
+        # Policy version recheck:
+        # If policy_version differs from binding, re-run policy engine for this purchase
+        # (excluding this payment's own reservation). Reject only if it now evaluates BLOCKED.
+        if not diffs and current_policy and current_product:
+            binding_version = binding.get("policy_version")
+            if binding_version is not None and binding_version != current_policy.policy_version:
+                ex_spent = current_policy.successful_spend_cents
+                ex_reserved = reserved_cents(db, exclude_payment_id=payment.id)
+                policy_snap = PolicySnapshot(
+                    total_budget_cents=current_policy.total_budget_cents,
+                    max_per_order_cents=current_policy.max_per_order_cents,
+                    daily_limit_cents=current_policy.daily_limit_cents,
+                    monthly_limit_cents=current_policy.monthly_limit_cents,
+                    currency=current_policy.currency,
+                    approved_merchant_ids=current_policy.approved_merchant_ids,
+                    blocked_categories=current_policy.blocked_categories,
+                    require_approval=current_policy.require_approval,
+                    agent_enabled=current_policy.agent_enabled,
+                    successful_spend_cents=ex_spent + ex_reserved,
+                    daily_spend_cents=daily_spent_cents(db, exclude_payment_id=payment.id),
+                    monthly_spend_cents=monthly_spent_cents(db, exclude_payment_id=payment.id),
+                )
+                product_snap = ProductSnapshot(
+                    id=current_product.id,
+                    price_cents=current_product.price_cents,
+                    currency=current_product.currency,
+                    merchant_id=current_product.merchant_id,
+                    category=current_product.category,
+                )
+                recheck_eval = evaluate(policy_snap, product_snap, human_approved=True)
+                if not recheck_eval.allowed:
+                    diffs["policy_version_violation"] = {
+                        "binding_version": binding_version,
+                        "current_version": current_policy.policy_version,
+                        "reasons": recheck_eval.reasons,
+                        "explanations": recheck_eval.explanations,
+                    }
+                else:
+                    audit_service.log(
+                        db=db,
+                        event_type="POLICY_VERSION_UPDATED_RECHECK_PASSED",
+                        details={
+                            "binding_policy_version": binding_version,
+                            "current_policy_version": current_policy.policy_version,
+                            "product_id": current_product.id,
+                        },
+                        proposal_id=payment.proposal_id,
+                        payment_id=payment.id,
+                    )
+
+        if diffs:
+            audit_service.log(
+                db=db,
+                event_type="PAYMENT_APPROVAL_MISMATCH",
+                details=diffs,
+                proposal_id=payment.proposal_id,
+                payment_id=payment.id,
+            )
+            # Payment status left untouched as prev_status (never stuck in "capturing")
+            # No call to PayPal
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "APPROVAL_MISMATCH",
+                    "APPROVAL_MISMATCH": True,
+                    "message": f"Security alert: Purchase conditions changed between approval and capture ({', '.join(diffs.keys())}).",
+                    "diff": diffs,
+                },
+            )
 
     # 2b. Atomic claim: Claim payment by moving status to 'capturing'
     claim_count = (
@@ -311,21 +449,41 @@ def capture_payment_order(
     # 2c. Recheck remaining budget before calling PayPal
     policy = db.query(Policy).first()
     if not policy:
-        payment.status = "pending"
+        payment.status = prev_status
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Spending policy is not configured.",
         )
 
-    remaining_budget = policy.total_budget_cents - policy.successful_spend_cents
-    if payment.amount_cents > remaining_budget:
-        payment.status = "pending"
+    other_reserved = reserved_cents(db, exclude_payment_id=payment.id)
+    if (policy.successful_spend_cents + other_reserved + payment.amount_cents) > policy.total_budget_cents:
+        payment.status = prev_status
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Remaining budget ({remaining_budget} cents) is insufficient for this payment ({payment.amount_cents} cents).",
+            detail=f"Remaining budget is insufficient for this payment ({payment.amount_cents} cents).",
         )
+
+    if policy.daily_limit_cents > 0:
+        current_daily = daily_spent_cents(db, exclude_payment_id=payment.id)
+        if (current_daily + payment.amount_cents) > policy.daily_limit_cents:
+            payment.status = prev_status
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Daily limit (${policy.daily_limit_cents / 100:.2f}) would be exceeded by this capture.",
+            )
+
+    if policy.monthly_limit_cents > 0:
+        current_monthly = monthly_spent_cents(db, exclude_payment_id=payment.id)
+        if (current_monthly + payment.amount_cents) > policy.monthly_limit_cents:
+            payment.status = prev_status
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Monthly limit (${policy.monthly_limit_cents / 100:.2f}) would be exceeded by this capture.",
+            )
 
     # 3. Call PayPal Capture API (includes pre-flight order status check)
     try:
@@ -336,8 +494,8 @@ def capture_payment_order(
     except PayPalError as err:
         issue_code = err.details.get("issue", "") if isinstance(err.details, dict) else ""
         if issue_code == "ORDER_NOT_APPROVED":
-            # Reset status to 'pending' on ORDER_NOT_APPROVED so the buyer can still approve
-            payment.status = "pending"
+            # Reset status to previous status on ORDER_NOT_APPROVED so the buyer can still approve
+            payment.status = prev_status
             db.commit()
             audit_service.log(
                 db=db,
