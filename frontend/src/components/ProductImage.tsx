@@ -103,3 +103,4 @@ export const ProductImage: React.FC<ProductImageProps> = ({
     </div>
   );
 };
+

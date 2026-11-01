@@ -373,3 +373,4 @@ export const PermissionCenter: React.FC<PermissionCenterProps> = ({
     </div>
   );
 };
+

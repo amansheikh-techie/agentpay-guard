@@ -111,3 +111,4 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     </div>
   );
 };
+

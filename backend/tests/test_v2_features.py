@@ -145,3 +145,4 @@ def test_approval_binding_mismatch_blocks_capture(client, clean_test_db):
     })
     assert cap_res.status_code == 409
     assert "APPROVAL_MISMATCH" in cap_res.json()["detail"]
+

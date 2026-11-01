@@ -44,3 +44,4 @@ export const TabNav: React.FC<TabNavProps> = ({ activeTab, onTabChange, pendingC
     </nav>
   );
 };
+

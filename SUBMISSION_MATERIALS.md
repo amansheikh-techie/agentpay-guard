@@ -55,7 +55,7 @@ The PayPal developer platform is the core transaction engine of AgentPay Guard:
 
 ### Accomplishments We're Proud Of
 
-- 35/35 automated unit and integration tests passing in `pytest` covering edge cases, policy violations, and idempotency.
+- 55/55 automated unit and integration tests passing in `pytest` covering edge cases, policy violations, and idempotency.
 - Zero secrets leaked: credentials are kept strictly in backend environment variables.
 - One-click demo state reset to facilitate repeatable evaluations and live testing.
 
@@ -105,14 +105,14 @@ The PayPal developer platform is the core transaction engine of AgentPay Guard:
 
 **Target Total Duration:** 2 minutes, 40 seconds (well under the 3:00 Devpost limit).
 
-| Timestamp | Screen Action | Voiceover Narration |
-| --- | --- | --- |
+| Timestamp       | Screen Action                                                                                                                       | Voiceover Narration                                                                                                                                                                                                                                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **0:00 – 0:25** | Open dashboard (`http://localhost:5173`). Highlight header badges and Policy Overview ($100 budget, $40 cap, approved merchants). | *"Welcome to AgentPay Guard, a safety layer for AI-assisted shopping built for the PayPal AI Hackathon 2026. While AI agents are great at finding products, giving them direct access to your wallet is dangerous. AgentPay Guard enforces strict spending rules: AI proposes, deterministic code validates, and the human explicitly authorizes every payment."* |
 | **0:25 – 0:50** | Click **Scenario A (Allowed)** quick button. Prompt appears: *"Find a wireless mouse under $35 from an approved merchant"*. Click **"Propose Purchase"**. | *"Let's test Scenario A. Our user asks for a wireless mouse under $35. The AI agent analyzes the request against our catalogue and recommends the TechCore Wireless Mouse. The server resolves the real price of $29.99 and evaluates our policy. It passes all checks: under the $40 cap and TechCore is an approved merchant. The proposal is marked ALLOWED BY POLICY."* |
 | **0:50 – 1:25** | Point to the **Mandatory Approval Gate**. Click **"Explicitly Approve & Pay $29.99"**. Click **"Complete Buyer Approval in PayPal Sandbox"** (or show Sandbox login). Click **"Verify & Capture Sandbox Payment"**. | *"Notice that no payment occurred automatically. Autonomous spending is forbidden. To proceed, the user must explicitly click 'Approve & Pay'. Our backend calls the PayPal Orders v2 API with an idempotency key and server-side pricing. Once approved in the PayPal Sandbox, our server verifies the capture directly with PayPal and updates our remaining budget from $100 down to $70.01."* |
 | **1:25 – 1:55** | Click **Scenario B (Blocked: Cap)** quick button. Prompt appears: *"I need a high-end mechanical keyboard"*. Click **"Propose Purchase"**. | *"Now let's test Scenario B: a prompt that exceeds our spending limit. The AI recommends a mechanical keyboard priced at $79.99. The policy engine immediately flags this as BLOCKED with the reason code MAX_ORDER_AMOUNT_EXCEEDED. Notice that checkout is completely disabled—no PayPal order can be created."* |
 | **1:55 – 2:20** | Click **Scenario C (Blocked: Merchant)** quick button. Prompt appears: *"Find a shadowtech gadget for my desk"*. Click **"Propose Purchase"**. | *"In Scenario C, the request asks for a product from ShadowTech. The backend checks its merchant allowlist and immediately blocks the purchase with MERCHANT_NOT_APPROVED. Rules are enforced strictly on the server regardless of prompt wording."* |
-| **2:20 – 2:40** | Scroll down to the **Audit Timeline**. Highlight recent events. Click **"Reset Demo"** in Policy Overview to show reset state. | *"Finally, our Immutable Audit Trail logs every proposal, policy verdict, and PayPal capture with millisecond timestamps. With a single click of 'Reset Demo', the entire environment returns to pristine state. AgentPay Guard demonstrates that AI commerce can be safe, transparent, and user-controlled with PayPal. Thank you!"* |
+| **2:20 – 2:40** | Scroll down to the **Audit Timeline**. Highlight recent events. Click **"Reset Demo"** in Policy Overview to show reset state.      | *"Finally, our Immutable Audit Trail logs every proposal, policy verdict, and PayPal capture with millisecond timestamps. With a single click of 'Reset Demo', the entire environment returns to pristine state. AgentPay Guard demonstrates that AI commerce can be safe, transparent, and user-controlled with PayPal. Thank you!"* |
 
 ---
 
@@ -143,11 +143,11 @@ Capture these 5 screenshots for the Devpost gallery:
 
 ## 5. AI Tools Disclosure
 
-| Tool | Application & Scope |
-| --- | --- |
-| **Google Gemini / OpenAI** | Interprets natural-language shopping requests and extracts matching `product_id` from the server-supplied catalogue. |
-| **Deterministic Fallback Engine** | Offline keyword scoring matcher used when API keys are absent, clearly labelled as `Demo Fallback Mode`. |
-| **Google Antigravity Agent** | Used for pair-programming, scaffolding, full-stack implementation, testing, and documentation generation. |
+| Tool                             | Application & Scope                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Google Gemini / OpenAI**       | Interprets natural-language shopping requests and extracts matching `product_id` from the server-supplied catalogue. |
+| **Deterministic Fallback Engine** | Offline keyword scoring matcher used when API keys are absent, clearly labelled as `Demo Fallback Mode`.          |
+| **Google Antigravity Agent**     | Used for pair-programming, scaffolding, full-stack implementation, testing, and documentation generation.          |
 
 ---
 
@@ -161,7 +161,7 @@ Capture these 5 screenshots for the Devpost gallery:
 - ✅ Idempotency protection against duplicate captures and double budget spend
 - ✅ Live interactive rule editor and demo state reset
 - ✅ Real-time immutable audit logging
-- ✅ 35/35 passing automated pytest tests and clean TypeScript build
+- ✅ 55/55 passing automated pytest tests and clean TypeScript build
 
 ### Future Roadmap (Post-Hackathon)
 

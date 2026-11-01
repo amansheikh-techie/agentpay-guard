@@ -77,3 +77,4 @@ def get_summary(db: Session = Depends(get_db)):
         failed_count=failed_count,
         by_merchant=by_merchant,
     )
+

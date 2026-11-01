@@ -129,3 +129,4 @@ export const ShoppingResults: React.FC<ShoppingResultsProps> = ({
     </div>
   );
 };
+
