@@ -61,3 +61,25 @@ app.include_router(agent.router, prefix="/api/agent")
 app.include_router(payments.router, prefix="/api/payments")
 app.include_router(summary.router, prefix="/api")
 
+# ── Static SPA Serving (Render / Production Single-Service) ───────────────────
+import os
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
+
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
+if os.path.isdir(frontend_dist):
+    assets_dir = os.path.join(frontend_dist, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        target = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.isfile(target):
+            return FileResponse(target)
+        index_path = os.path.join(frontend_dist, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+        return {"status": "ok", "message": "AgentPay Guard API online"}
+
+
