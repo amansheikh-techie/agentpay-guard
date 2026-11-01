@@ -31,3 +31,5 @@ Thumbs.db
 
 # ── Local scratch ─────────────────────────────────────────────────────────────
 PRD_EXTRACTED.md
+*.zip
+
