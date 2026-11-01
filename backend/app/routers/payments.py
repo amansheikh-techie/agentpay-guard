@@ -52,6 +52,7 @@ def reserved_cents(db: Session, window_minutes: int = 30, exclude_payment_id: Op
     Compute total cents reserved by in-flight orders created within the last `window_minutes`.
     Counts payments in pending, approved, capturing, or needs_verification statuses.
     """
+    policy = db.query(Policy).first()
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
     query = (
         db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
@@ -60,6 +61,8 @@ def reserved_cents(db: Session, window_minutes: int = 30, exclude_payment_id: Op
             Payment.created_at >= cutoff,
         )
     )
+    if policy and policy.last_reset_at:
+        query = query.filter(Payment.created_at >= policy.last_reset_at)
     if exclude_payment_id:
         query = query.filter(Payment.id != exclude_payment_id)
     return int(query.scalar() or 0)
@@ -70,6 +73,9 @@ def daily_spent_cents(db: Session, window_minutes: int = 30, exclude_payment_id:
     Compute total cents captured in the current UTC calendar day
     plus active in-flight reserved orders within the window for the current day.
     """
+    policy = db.query(Policy).first()
+    last_reset_at = policy.last_reset_at if policy else None
+
     now = datetime.now(timezone.utc)
     start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     cutoff = now - timedelta(minutes=window_minutes)
@@ -83,6 +89,10 @@ def daily_spent_cents(db: Session, window_minutes: int = 30, exclude_payment_id:
         Payment.created_at >= cutoff,
         Payment.created_at >= start_of_day,
     )
+    if last_reset_at:
+        cap_query = cap_query.filter(Payment.created_at >= last_reset_at)
+        res_query = res_query.filter(Payment.created_at >= last_reset_at)
+
     if exclude_payment_id:
         cap_query = cap_query.filter(Payment.id != exclude_payment_id)
         res_query = res_query.filter(Payment.id != exclude_payment_id)
@@ -95,6 +105,9 @@ def monthly_spent_cents(db: Session, window_minutes: int = 30, exclude_payment_i
     Compute total cents captured in the current UTC calendar month
     plus active in-flight reserved orders within the window for the current month.
     """
+    policy = db.query(Policy).first()
+    last_reset_at = policy.last_reset_at if policy else None
+
     now = datetime.now(timezone.utc)
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     cutoff = now - timedelta(minutes=window_minutes)
@@ -108,6 +121,10 @@ def monthly_spent_cents(db: Session, window_minutes: int = 30, exclude_payment_i
         Payment.created_at >= cutoff,
         Payment.created_at >= start_of_month,
     )
+    if last_reset_at:
+        cap_query = cap_query.filter(Payment.created_at >= last_reset_at)
+        res_query = res_query.filter(Payment.created_at >= last_reset_at)
+
     if exclude_payment_id:
         cap_query = cap_query.filter(Payment.id != exclude_payment_id)
         res_query = res_query.filter(Payment.id != exclude_payment_id)
@@ -649,6 +666,7 @@ def list_payments(
     db: Session = Depends(get_db),
 ):
     """Return historical transactions, newest first, with optional status filter."""
+    policy = db.query(Policy).first()
     query = (
         db.query(
             Payment.id,
@@ -666,6 +684,8 @@ def list_payments(
         .outerjoin(Proposal, Proposal.id == Payment.proposal_id)
         .outerjoin(Product, Product.id == Proposal.selected_product_id)
     )
+    if policy and policy.last_reset_at:
+        query = query.filter(Payment.created_at >= policy.last_reset_at)
     if status:
         query = query.filter(Payment.status == status)
 

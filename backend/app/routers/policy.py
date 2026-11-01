@@ -1,6 +1,7 @@
 """
 routers/policy.py — GET /api/policy  and  PUT /api/policy
 """
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -87,6 +88,7 @@ def reset_policy(db: Session = Depends(get_db)):
     Reset demo policy and budget counters to initial state for repeat demo runs.
     """
     from app.seed import DEFAULT_POLICY
+    now_utc = datetime.now(timezone.utc)
     policy = _get_policy(db)
     policy.total_budget_cents = DEFAULT_POLICY["total_budget_cents"]
     policy.max_per_order_cents = DEFAULT_POLICY["max_per_order_cents"]
@@ -99,6 +101,7 @@ def reset_policy(db: Session = Depends(get_db)):
     policy.agent_enabled = DEFAULT_POLICY.get("agent_enabled", True)
     policy.policy_version = 1
     policy.successful_spend_cents = 0
+    policy.last_reset_at = now_utc
     db.commit()
     db.refresh(policy)
 
@@ -110,6 +113,7 @@ def reset_policy(db: Session = Depends(get_db)):
             "total_budget_cents": policy.total_budget_cents,
             "max_per_order_cents": policy.max_per_order_cents,
             "policy_version": policy.policy_version,
+            "last_reset_at": now_utc.isoformat(),
         },
     )
 

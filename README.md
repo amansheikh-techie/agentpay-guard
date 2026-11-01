@@ -34,6 +34,19 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 
 ---
 
+## Key Features
+
+- **Autonomous Agent Proposals:** Interprets natural-language shopping requests using Google Gemini (free tier) or OpenAI to identify matching items from a curated catalogue.
+- **Deterministic Spending Guardrails:** Enforces total budget limits, maximum per-order limits, daily limits, monthly limits, approved merchant allowlists, and category blocks independently of the AI.
+- **Approval Binding Invariant:** Binds proposal ID, product ID, merchant ID, price in cents, currency, and policy version at order creation; re-verifies all properties prior to capture.
+- **Smart Alternative Discovery:** When a requested purchase violates spending policy, the engine automatically explains the violation in plain English and recommends in-budget, allowable alternatives.
+- **Concurrency & Reservation Protection:** Automatically reserves funds for active in-flight orders, preventing race conditions and budget overages.
+- **Atomic Capture & Verification:** Directly calls PayPal Orders REST API to capture payments and verify amounts and transaction IDs before updating policy counters.
+- **Immutable Audit Trail:** Chronologically records all proposal generations, policy decisions, approvals, and captures in an append-only audit log.
+- **Non-Destructive Demo Reset:** Restores guardrail defaults for judge evaluations without deleting historical audit or payment rows.
+
+---
+
 ## Tech Stack
 
 | Layer       | Technology                                                     |
@@ -43,7 +56,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 | Persistence | SQLite + SQLAlchemy 2                                          |
 | Validation  | Pydantic v2                                                    |
 | Payments    | PayPal Orders v2 REST API (Sandbox)                            |
-| AI          | OpenAI-compatible via provider adapter + deterministic fallback |
+| AI          | OpenAI-compatible via provider adapter (Gemini / OpenAI) + deterministic fallback |
 | Tests       | pytest + FastAPI TestClient                                    |
 
 ---
@@ -55,7 +68,7 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 - **npm 9+** — `npm --version`
 - **Git** — `git --version`
 - A **PayPal Developer** account (free) for sandbox credentials: [https://developer.paypal.com/](https://developer.paypal.com/)
-- *(Optional)* An OpenAI API key for live AI mode; the app runs in fallback mode without one.
+- *(Optional)* A Google Gemini API key (free tier available at [Google AI Studio](https://aistudio.google.com/)) or an OpenAI API key for live AI mode; the app runs in deterministic fallback mode without one.
 
 ---
 
@@ -92,9 +105,10 @@ PAYPAL_CLIENT_ID=your_sandbox_client_id
 PAYPAL_CLIENT_SECRET=your_sandbox_client_secret
 
 # AI Provider (optional — leave blank for deterministic fallback mode)
-AI_PROVIDER=openai        # or "none"
+AI_PROVIDER=gemini        # "gemini", "openai", or "none"
 AI_API_KEY=your_api_key
-AI_MODEL=gpt-4o-mini
+AI_MODEL=gemini-2.5-flash # or "gpt-4o-mini"
+AI_BASE_URL=              # optional custom OpenAI-compatible base URL
 
 # Admin Security (optional in development; required in production)
 ADMIN_TOKEN=your_secure_admin_token
@@ -147,9 +161,10 @@ pytest tests/ -v
 | `DATABASE_URL`         | No       | SQLite path, default `sqlite:///./agentpay_guard.db`                               |
 | `FRONTEND_ORIGIN`      | No       | CORS origin for frontend, default `http://localhost:5173`                          |
 | `ADMIN_TOKEN`          | No*      | Required outside `development` for `PUT /api/policy` and `POST /api/policy/reset`  |
-| `AI_PROVIDER`          | No       | `openai`, or `none` (fallback)                                                     |
-| `AI_API_KEY`           | No       | Provider API key — backend only, never in frontend                                 |
-| `AI_MODEL`             | No       | Model name for the selected provider                                               |
+| `AI_PROVIDER`          | No       | `gemini`, `openai`, or `none` (fallback)                                           |
+| `AI_API_KEY`           | No       | Provider API key (e.g. Gemini free tier or OpenAI) — backend only, never in frontend |
+| `AI_MODEL`             | No       | Model name (e.g. `gemini-2.5-flash` or `gpt-4o-mini`)                              |
+| `AI_BASE_URL`          | No       | Custom base URL; defaults to Gemini/OpenAI standard endpoint                       |
 | `PAYPAL_MODE`          | Yes      | Must be `sandbox` for this project                                                 |
 | `PAYPAL_CLIENT_ID`     | Yes*     | Sandbox Client ID from developer.paypal.com                                        |
 | `PAYPAL_CLIENT_SECRET` | Yes*     | Sandbox Client Secret — **never commit or expose**                                 |
@@ -172,6 +187,22 @@ AgentPay Guard provides robust multi-order safety:
 
 ---
 
+## Demo Reset & Repeat Runs
+
+For hackathon demonstrations, judges, and repeatable testing:
+
+- **How Reset Demo Works:**
+  - Invoking `POST /api/policy/reset` (or clicking **"Reset to Demo Defaults"** on the Permissions tab) restores the spending guardrails to pristine demo defaults: total budget `$100.00`, per-order cap `$40.00`, unlimited daily and monthly limits ($0), cleared category blocks, human approval required, and agent purchase authority enabled.
+  - The endpoint sets `policies.last_reset_at` to the current UTC timestamp, resets `successful_spend_cents = 0`, and logs a `DEMO_RESET` audit entry.
+- **Non-Destructive History:**
+  - Reset demo **never deletes** records from `payments`, `proposals`, or `audit_events`. Audit trails remain completely immutable and continuous.
+- **Post-Reset Isolation:**
+  - Active metric calculations (`GET /api/summary`), period spending evaluations (`daily_spent_cents`, `monthly_spent_cents`), reserved in-flight queries (`reserved_cents`), and transactions/approvals lists count only payments created **after** `last_reset_at`.
+  - Invariant guarantee: After any capture or reset, `GET /api/summary` `completed_cents` always strictly equals `policy.successful_spend_cents`.
+  - The overview mission control immediately reflects `$0.00` settled spend and `$100.00` available budget, daily limits do not count pre-reset payments, and new purchases proceed normally.
+
+---
+
 ## PayPal Sandbox Setup
 
 1. Sign up at [https://developer.paypal.com/](https://developer.paypal.com/)
@@ -183,10 +214,10 @@ AgentPay Guard provides robust multi-order safety:
 
 ## AI Tools Used
 
-| Tool                   | Role                                                                                                                                                                                            |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI (optional)      | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. The model has no authority over price, merchant, policy outcome, or payment status. |
-| Deterministic fallback | Keyword-matching engine that selects a catalogue product when no AI key is configured. Clearly labelled "Demo Fallback Mode" — never misrepresented as an LLM response.                     |
+| Tool | Role |
+| ---- | ---- |
+| Google Gemini / OpenAI (optional) | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. Fully compatible with Google Gemini free-tier keys (via Google AI Studio) or OpenAI. The model has no authority over price, merchant, policy outcome, or payment status. |
+| Deterministic fallback | Keyword-matching engine that selects a catalogue product when no AI key is configured. Clearly labelled "Demo Fallback Mode" — never misrepresented as an LLM response. |
 
 ---
 
@@ -213,6 +244,41 @@ When a user's request results in a **BLOCKED** primary recommendation (such as e
 
 ---
 
+## Troubleshooting
+
+### 1. Checking AI Integration Status
+To inspect the health and provider status without leaking secrets:
+- Open `http://localhost:8000/api/health` in your browser or curl it.
+- Check `ai_status`:
+  - `"ok"`: The configured AI provider is working and communicating properly.
+  - `"not configured"`: No valid key is set or `AI_PROVIDER=none` (the app runs in deterministic fallback mode).
+  - `"error: HTTP 404 (model not found)"`: The configured `AI_MODEL` is not accessible with your API key. Check available models or leave `AI_MODEL` blank to use the recommended default (`gemini-2.5-flash` or `gpt-4o-mini`).
+  - `"error: HTTP 401 (unauthorized)"`: The provided `AI_API_KEY` is invalid or expired.
+
+### 2. Restarting Backend After Editing `.env`
+Note that `uvicorn --reload` watches Python source files, **not** `.env`. Whenever you modify `backend/.env`, restart the backend server:
+```powershell
+# Stop running uvicorn process (Ctrl+C in terminal), then restart:
+cd backend
+.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
+```
+
+### 3. Freeing Port 8000 on Windows
+If you encounter `[WinError 10013]` or `[Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000)`, an existing process may be holding port 8000:
+```powershell
+# 1. Find the PID using port 8000
+netstat -ano | findstr :8000
+
+# 2. Stop the process by PID (e.g., if PID is 14240)
+Stop-Process -Id 14240 -Force
+```
+If port 8000 is reserved by Windows exclusion ranges, you can also specify a free port:
+```powershell
+.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8080
+```
+
+---
+
 ## Deployment Notes
 
 - Set `APP_ENV=production` when deploying.
@@ -229,6 +295,28 @@ When a user's request results in a **BLOCKED** primary recommendation (such as e
 - PayPal Sandbox only — no real money is ever charged.
 - Single demo policy (no multi-user isolation in MVP).
 - The AI is not a trust boundary; it only suggests product IDs.
+
+---
+
+## Product Images
+
+Catalogue products include image URLs mapped to local asset illustrations or hosted static previews. The frontend uses a resilient `ProductImage` component that gracefully falls back to category-themed SVGs with badges if an external image is unavailable or blocked, ensuring a clean and consistent presentation.
+
+---
+
+## Screenshots
+
+> *Screenshots from the working application (placeholders below; images are stored in `docs/screenshots/`)*
+
+| Overview & Mission Control | Spending Guardrails & Permissions |
+| :---: | :---: |
+| ![Overview](docs/screenshots/01_overview.png) | ![Permissions](docs/screenshots/02_permissions.png) |
+| *Mission Control dashboard with live budget, daily spend, and metrics* | *Configurable spending limits and merchant allowlists* |
+
+| Smart Alternatives Proposal | PayPal Sandbox Checkout |
+| :---: | :---: |
+| ![Alternatives](docs/screenshots/03_smart_alternatives.png) | ![PayPal Checkout](docs/screenshots/04_paypal_checkout.png) |
+| *Automated policy block explanation and safe alternatives* | *Verified PayPal Sandbox payment capture and approval* |
 
 ---
 

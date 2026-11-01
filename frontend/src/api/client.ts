@@ -6,16 +6,21 @@ import type { HealthStatus, Policy, Product, Proposal, AuditEvent, SummaryRespon
 const BASE = '/api'; // proxied to http://localhost:8000 by Vite dev server
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const { headers: customHeaders, ...restOptions } = options || {};
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
+    ...restOptions,
+    headers: { 'Content-Type': 'application/json', ...(customHeaders as Record<string, string>) },
   });
 
   if (!res.ok) {
     let message = `Request failed: ${res.status} ${res.statusText}`;
     try {
       const body = await res.json();
-      message = body?.detail ?? body?.message ?? message;
+      if (body?.detail) {
+        message = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+      } else if (body?.message) {
+        message = typeof body.message === 'string' ? body.message : JSON.stringify(body.message);
+      }
     } catch {
       // ignore parse errors
     }

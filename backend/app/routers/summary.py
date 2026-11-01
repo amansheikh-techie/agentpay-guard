@@ -4,7 +4,6 @@ routers/summary.py — GET /api/summary
 Provides aggregated metrics for budget utilization, status counts,
 and merchant breakdowns.
 """
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -22,13 +21,14 @@ def get_summary(db: Session = Depends(get_db)):
     """Return dashboard summary numbers."""
     policy = db.query(Policy).first()
     total_budget_cents = policy.total_budget_cents if policy else 10000
+    last_reset_at = policy.last_reset_at if policy else None
 
-    completed_cents = int(
-        db.query(func.coalesce(func.sum(Payment.amount_cents), 0))
-        .filter(Payment.status == "captured")
-        .scalar()
-        or 0
+    cap_query = db.query(func.coalesce(func.sum(Payment.amount_cents), 0)).filter(
+        Payment.status == "captured"
     )
+    if last_reset_at:
+        cap_query = cap_query.filter(Payment.created_at >= last_reset_at)
+    completed_cents = int(cap_query.scalar() or 0)
 
     in_flight = reserved_cents(db, window_minutes=30)
     remaining_cents = max(0, total_budget_cents - completed_cents - in_flight)
@@ -37,12 +37,18 @@ def get_summary(db: Session = Depends(get_db)):
     monthly_spent = monthly_spent_cents(db)
 
     blocked_count = db.query(Proposal).filter(Proposal.policy_decision == "BLOCKED").count()
-    completed_count = db.query(Payment).filter(Payment.status == "captured").count()
-    failed_count = db.query(Payment).filter(Payment.status.in_(["cancelled", "failed"])).count()
+
+    comp_count_query = db.query(Payment).filter(Payment.status == "captured")
+    fail_count_query = db.query(Payment).filter(Payment.status.in_(["cancelled", "failed"]))
+    if last_reset_at:
+        comp_count_query = comp_count_query.filter(Payment.created_at >= last_reset_at)
+        fail_count_query = fail_count_query.filter(Payment.created_at >= last_reset_at)
+    completed_count = comp_count_query.count()
+    failed_count = fail_count_query.count()
 
     # Merchant spend summary
     # Join Payment -> Proposal -> Product
-    merchant_rows = (
+    merchant_query = (
         db.query(
             Product.merchant_id,
             Product.merchant_name,
@@ -52,9 +58,10 @@ def get_summary(db: Session = Depends(get_db)):
         .join(Proposal, Proposal.selected_product_id == Product.id)
         .join(Payment, Payment.proposal_id == Proposal.id)
         .filter(Payment.status == "captured")
-        .group_by(Product.merchant_id, Product.merchant_name)
-        .all()
     )
+    if last_reset_at:
+        merchant_query = merchant_query.filter(Payment.created_at >= last_reset_at)
+    merchant_rows = merchant_query.group_by(Product.merchant_id, Product.merchant_name).all()
 
     by_merchant = [
         MerchantSpendSummary(
@@ -77,4 +84,3 @@ def get_summary(db: Session = Depends(get_db)):
         failed_count=failed_count,
         by_merchant=by_merchant,
     )
-

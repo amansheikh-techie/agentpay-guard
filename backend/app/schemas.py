@@ -26,6 +26,7 @@ class PolicyRead(BaseModel):
     policy_version: int = 1
     successful_spend_cents: int
     remaining_budget_cents: int = 0
+    last_reset_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

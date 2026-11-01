@@ -41,6 +41,8 @@ def run_sqlite_migrations(target_engine):
                 conn.execute(text("ALTER TABLE policies ADD COLUMN agent_enabled BOOLEAN NOT NULL DEFAULT 1"))
             if "policy_version" not in cols:
                 conn.execute(text("ALTER TABLE policies ADD COLUMN policy_version INTEGER NOT NULL DEFAULT 1"))
+            if "last_reset_at" not in cols:
+                conn.execute(text("ALTER TABLE policies ADD COLUMN last_reset_at TIMESTAMP DEFAULT NULL"))
 
         if "products" in tables:
             cols = {c["name"] for c in inspector.get_columns("products")}

@@ -66,6 +66,7 @@ def clean_test_db(setup_tables):
             policy.blocked_categories = []
             policy.agent_enabled = True
             policy.policy_version = 1
+            policy.last_reset_at = None
         db.commit()
     finally:
         db.close()
@@ -78,12 +79,11 @@ def mock_ai_fallback(monkeypatch):
     from app import config
     settings = config.get_settings()
     monkeypatch.setattr(settings, "ai_provider", "none")
-    monkeypatch.setattr(settings, "ai_api_key", "")
 
 
 @pytest.fixture
 def client():
     app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
-        yield c
+    with TestClient(app) as test_client:
+        yield test_client
     app.dependency_overrides.clear()

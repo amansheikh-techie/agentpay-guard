@@ -8,17 +8,55 @@ Architecture & Trust Boundary:
   merchant identity, policy decision, budget remaining, or payment status.
 - If AI credentials are not configured or the call fails, a deterministic fallback
   engine selects the best matching products and labels the output clearly.
+- Supports any OpenAI-compatible API endpoint (OpenAI, Google Gemini via its
+  OpenAI compatibility layer, or custom self-hosted endpoints).
 """
 from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Module-level tracking for /api/health ai_status
+_last_ai_status: str = "ok"
+
+
+def get_ai_status(settings: Optional[Any] = None) -> str:
+    """Return status string for /api/health: ok, not configured, or error: ..."""
+    if settings is None:
+        settings = get_settings()
+    if not settings.ai_configured:
+        return "not configured"
+    return _last_ai_status
+
+
+def set_ai_status(status_str: str) -> None:
+    """Update active ai_status string."""
+    global _last_ai_status
+    _last_ai_status = status_str
+
+
+def _sanitize_message(text: str, key: str = "") -> str:
+    """Sanitize error message to prevent leaking API keys, auth headers, or credentials."""
+    if not text:
+        return ""
+    msg = text.replace("\r", " ").replace("\n", " ")
+    if key and len(key) > 4:
+        msg = msg.replace(key, "[REDACTED_KEY]")
+    # Redact common key patterns and authorization headers
+    msg = re.sub(r"AIza[0-9A-Za-z\-_]{20,}", "[REDACTED_KEY]", msg)
+    msg = re.sub(r"sk-[0-9A-Za-z\-_]{20,}", "[REDACTED_KEY]", msg)
+    msg = re.sub(r"Bearer\s+[^\s\",']+", "Bearer [REDACTED]", msg, flags=re.IGNORECASE)
+    # Strip URL credentials or tokens, leaving only hostnames
+    msg = re.sub(r"https?://[^\s\"'<>]+", lambda m: urlparse(m.group(0)).hostname or "[URL]", msg)
+    msg = re.sub(r"\s+", " ", msg).strip()
+    return msg[:160]
 
 
 class AICandidate(BaseModel):
@@ -139,8 +177,61 @@ def _deterministic_fallback(user_request: str, catalogue: list[dict[str, Any]]) 
     )
 
 
+def _extract_json_str(text: str) -> str:
+    """Extract clean JSON string even if the model wrapped it in markdown code fences."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return stripped
+
+
+def _default_model_for_provider(settings: Any) -> str:
+    if getattr(settings, "ai_provider", "").lower() == "gemini":
+        return "gemini-2.5-flash"
+    return "gpt-4o-mini"
+
+
+def _clean_model_name(model_name: str) -> str:
+    """Strip models/ prefix if present."""
+    m = model_name.strip()
+    if m.startswith("models/"):
+        return m[len("models/"):]
+    return m
+
+
+def _build_chat_url(base_url: str) -> str:
+    """Build chat completions URL ensuring exactly one slash between parts."""
+    return f"{base_url.rstrip('/')}/chat/completions"
+
+
+def _post_chat_completion(
+    client: Any,
+    chat_url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> Any:
+    """
+    Post chat completion to an OpenAI-compatible endpoint.
+    If the endpoint rejects response_format (e.g. HTTP 400 Bad Request),
+    automatically retries once without response_format and falls back to strict prompt instructions.
+    """
+    resp = client.post(chat_url, headers=headers, json=payload)
+    if resp.status_code == 400 and "response_format" in payload:
+        logger.warning("Endpoint rejected response_format (HTTP 400); retrying once without response_format.")
+        fallback_payload = dict(payload)
+        fallback_payload.pop("response_format", None)
+        resp = client.post(chat_url, headers=headers, json=fallback_payload)
+    resp.raise_for_status()
+    return resp
+
+
 def _call_openai(user_request: str, catalogue: list[dict[str, Any]], settings: Any) -> AIRecommendation:
-    """Call OpenAI API in JSON mode with support for ranked candidate suggestions."""
+    """Call OpenAI-compatible API in JSON mode with support for ranked candidate suggestions."""
     import httpx
 
     simplified_catalogue = [
@@ -181,22 +272,28 @@ def _call_openai(user_request: str, catalogue: list[dict[str, Any]], settings: A
         "Authorization": f"Bearer {settings.ai_api_key}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "model": settings.ai_model or "gpt-4o-mini",
+    raw_model = settings.ai_model or _default_model_for_provider(settings)
+    model = _clean_model_name(raw_model)
+    chat_url = _build_chat_url(settings.effective_ai_base_url)
+
+    payload: dict[str, Any] = {
+        "model": model,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.2,
     }
+    # Only send temperature for providers that reliably accept it (e.g. OpenAI)
+    if settings.ai_provider.lower() != "gemini":
+        payload["temperature"] = 0.2
 
-    with httpx.Client(timeout=15.0) as client:
-        resp = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-        resp.raise_for_status()
+    with httpx.Client(timeout=30.0) as client:
+        resp = _post_chat_completion(client, chat_url, headers, payload)
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
+        cleaned_content = _extract_json_str(content)
+        parsed = json.loads(cleaned_content)
         rec = AIRecommendation.model_validate(parsed)
         # Ensure candidates includes at least the primary product_id
         if not rec.candidates and rec.product_id:
@@ -238,7 +335,7 @@ def generate_block_explanation(
             "Here are approved alternatives within your spending rules:"
         )
 
-    if ai_mode != "live" or not settings.ai_configured or settings.ai_provider != "openai":
+    if ai_mode != "live" or not settings.ai_configured or settings.ai_provider.lower() not in ("openai", "gemini"):
         return _fallback_explanation()
 
     try:
@@ -257,66 +354,66 @@ def generate_block_explanation(
             "Authorization": f"Bearer {settings.ai_api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": settings.ai_model or "gpt-4o-mini",
+        raw_model = settings.ai_model or _default_model_for_provider(settings)
+        model = _clean_model_name(raw_model)
+        chat_url = _build_chat_url(settings.effective_ai_base_url)
+
+        payload: dict[str, Any] = {
+            "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "max_tokens": 100,
-            "temperature": 0.3,
         }
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+        if settings.ai_provider.lower() != "gemini":
+            payload["temperature"] = 0.3
+
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(chat_url, headers=headers, json=payload)
             if resp.status_code == 200:
                 data = resp.json()
                 return data["choices"][0]["message"]["content"].strip()
     except Exception as exc:
-        logger.warning("AI block explanation failed (%s). Falling back to template.", exc)
+        sanitized = _sanitize_message(str(exc), settings.ai_api_key)
+        logger.warning("AI block explanation failed (%s: %s). Falling back to template.", type(exc).__name__, sanitized)
 
     return _fallback_explanation()
 
 
 def validate_extracted_requirements(data: Any, valid_categories: set[str]) -> Optional[dict[str, Any]]:
     """
-    Validate AI requirements strictly:
-    - category must be one of the catalogue categories (else None/null)
-    - max_price_cents a positive integer (else None/null)
-    - features at most 5 short strings
-    Returns None if data is not a dict.
+    Validate JSON extracted by the AI model:
+    - category must be in valid_categories (case-insensitive) or None
+    - max_price_cents must be a positive integer or None
+    - features must be a list of at most 5 short strings
     """
     if not isinstance(data, dict):
         return None
 
-    raw_cat = data.get("category")
-    cat = None
-    if raw_cat and isinstance(raw_cat, str):
-        cleaned_cat = raw_cat.strip().lower()
-        if cleaned_cat in {c.lower() for c in valid_categories}:
-            cat = cleaned_cat
+    cat = data.get("category")
+    if cat is not None:
+        cat_str = str(cat).strip().lower()
+        cat = cat_str if cat_str in valid_categories else None
 
-    raw_price = data.get("max_price_cents")
-    max_price = None
-    if raw_price is not None:
+    price = data.get("max_price_cents")
+    if price is not None:
         try:
-            val = int(raw_price)
-            if val > 0:
-                max_price = val
+            price = int(price)
+            if price <= 0:
+                price = None
         except (ValueError, TypeError):
-            max_price = None
+            price = None
 
-    raw_features = data.get("features")
-    features: list[str] = []
-    if isinstance(raw_features, list):
-        for f in raw_features:
-            if isinstance(f, str) and f.strip():
-                features.append(f.strip()[:60])
-            if len(features) >= 5:
-                break
+    features = data.get("features", [])
+    if isinstance(features, list):
+        features = [str(f).strip() for f in features if f and isinstance(f, str)][:5]
+    else:
+        features = []
 
     return {
         "category": cat,
-        "max_price_cents": max_price,
+        "max_price_cents": price,
         "features": features,
     }
 
@@ -331,7 +428,7 @@ def extract_requirements_from_ai(
     If the AI call fails or returns invalid JSON, returns None.
     """
     settings = get_settings()
-    if not settings.ai_configured or settings.ai_provider != "openai":
+    if not settings.ai_configured or settings.ai_provider.lower() not in ("openai", "gemini"):
         return None
 
     try:
@@ -355,24 +452,31 @@ def extract_requirements_from_ai(
             "Authorization": f"Bearer {settings.ai_api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": settings.ai_model or "gpt-4o-mini",
+        raw_model = settings.ai_model or _default_model_for_provider(settings)
+        model = _clean_model_name(raw_model)
+        chat_url = _build_chat_url(settings.effective_ai_base_url)
+
+        payload: dict[str, Any] = {
+            "model": model,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"User request: {user_request}"},
             ],
-            "temperature": 0.0,
         }
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-            resp.raise_for_status()
+        if settings.ai_provider.lower() != "gemini":
+            payload["temperature"] = 0.0
+
+        with httpx.Client(timeout=20.0) as client:
+            resp = _post_chat_completion(client, chat_url, headers, payload)
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
+            cleaned_content = _extract_json_str(content)
+            parsed = json.loads(cleaned_content)
             return validate_extracted_requirements(parsed, set(c.lower() for c in valid_categories))
     except Exception as exc:
-        logger.warning("AI requirement extraction failed (%s). Falling back to keyword matcher.", exc)
+        sanitized = _sanitize_message(str(exc), settings.ai_api_key)
+        logger.warning("AI requirement extraction failed (%s: %s). Falling back to keyword matcher.", type(exc).__name__, sanitized)
         return None
 
 
@@ -387,6 +491,7 @@ def generate_recommendation(
     settings = get_settings()
 
     if not settings.ai_configured:
+        set_ai_status("not configured")
         return AIProposalResult(
             recommendation=_deterministic_fallback(user_request, catalogue),
             ai_mode="fallback"
@@ -394,24 +499,52 @@ def generate_recommendation(
 
     # Attempt live AI provider
     try:
-        if settings.ai_provider == "openai":
+        if settings.ai_provider.lower() in ("openai", "gemini"):
             rec = _call_openai(user_request, catalogue, settings)
             valid_ids = {p["id"] for p in catalogue}
             if rec.product_id not in valid_ids:
                 logger.warning("AI model returned product_id not in catalogue: %s", rec.product_id)
                 fallback = _deterministic_fallback(user_request, catalogue)
                 fallback.rationale = f"[Fallback: Model proposed unknown ID '{rec.product_id}'] {fallback.rationale}"
+                set_ai_status("ok")
                 return AIProposalResult(recommendation=fallback, ai_mode="fallback")
             # Filter candidates so only valid catalogue ids remain
             rec.candidates = [c for c in rec.candidates if c.product_id in valid_ids]
+            set_ai_status("ok")
             return AIProposalResult(recommendation=rec, ai_mode="live")
         else:
+            set_ai_status("not configured")
             return AIProposalResult(
                 recommendation=_deterministic_fallback(user_request, catalogue),
                 ai_mode="fallback"
             )
     except Exception as exc:
-        logger.warning("AI provider failed (%s: %s). Falling back to deterministic engine.", type(exc).__name__, exc)
+        import httpx
+
+        sanitized_msg = _sanitize_message(str(exc), settings.ai_api_key)
+
+        if isinstance(exc, httpx.HTTPStatusError):
+            code = exc.response.status_code
+            try:
+                err_json = exc.response.json()
+                raw_err = str(err_json.get("error", {}).get("message", exc.response.text))
+                sanitized_msg = _sanitize_message(raw_err, settings.ai_api_key)
+            except Exception:
+                pass
+
+            if code == 404:
+                logger.warning("configured model not found (HTTP 404): %s", sanitized_msg)
+                set_ai_status("error: HTTP 404 (model not found)")
+            else:
+                logger.warning("AI provider HTTP error (HTTP %d): %s", code, sanitized_msg)
+                set_ai_status(f"error: HTTP {code}")
+        elif isinstance(exc, httpx.TimeoutException):
+            logger.warning("AI provider request timed out (%s)", type(exc).__name__)
+            set_ai_status("error: timeout")
+        else:
+            logger.warning("AI provider error (%s): %s", type(exc).__name__, sanitized_msg)
+            set_ai_status(f"error: {type(exc).__name__}")
+
         fallback = _deterministic_fallback(user_request, catalogue)
         fallback.rationale = f"[Fallback: AI provider error] {fallback.rationale}"
         return AIProposalResult(recommendation=fallback, ai_mode="fallback")

@@ -36,6 +36,7 @@ class Policy(Base):
     agent_enabled = Column(Boolean, nullable=False, default=True)
     policy_version = Column(Integer, nullable=False, default=1)
     successful_spend_cents = Column(Integer, nullable=False, default=0)
+    last_reset_at = Column(DateTime(timezone=True), nullable=True, default=None)
     created_at = Column(DateTime(timezone=True), default=_now)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 
