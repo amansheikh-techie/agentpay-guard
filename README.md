@@ -47,6 +47,27 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 
 ---
 
+## Voice Assistant
+
+AgentPay Guard includes a **Conversational Voice Assistant** for hands-free shopping requests and spoken policy feedback.
+
+### How It Works
+
+1. **Voice Input via Web Speech API:** Users click the microphone icon in the AI Shopping tab and speak their shopping request in natural language (e.g. *"Find an ergonomic wireless mouse under $35"*).
+2. **Live Visual Transcript:** As the user speaks, interim recognition text is displayed in real-time with visual microphone pulse feedback.
+3. **Deterministic Spoken Replies:** Once the server evaluates the proposal against the spending policy, the assistant reads the verdict aloud using browser `window.speechSynthesis` (preferring `en-IN` or `en-US` voices).
+4. **Verifiable Verdict Contents:** Spoken replies state the proposed product name, authoritative USD price, policy outcome (`ALLOWED` or `BLOCKED` with the explicit rule name), and reminds the user that manual approval is required.
+5. **Interactive Audio Controls:** Users can mute/unmute voice replies or stop audio playback instantly via the header controls.
+
+### Hard Security Boundaries & Limitations
+
+- **Voice Cannot Authorize or Pay:** Voice is strictly an input/output discovery layer. No order can be created or payment captured without an explicit human click in the Approvals tab.
+- **Unclear Speech Rejection:** Deterministic backend validation rejects silent or unintelligible speech inputs with a helpful repeat prompt without generating database rows or calling payment APIs.
+- **Supported Browsers:** Google Chrome, Microsoft Edge, and modern Chromium-based browsers that support the standard Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`). In unsupported browsers, the microphone gracefully hides while typed natural-language shopping remains 100% operational.
+- **Environment:** USD only, PayPal Sandbox only — no real currency.
+
+---
+
 ## Tech Stack
 
 | Layer       | Technology                                                     |
@@ -247,7 +268,9 @@ When a user's request results in a **BLOCKED** primary recommendation (such as e
 ## Troubleshooting
 
 ### 1. Checking AI Integration Status
+
 To inspect the health and provider status without leaking secrets:
+
 - Open `http://localhost:8000/api/health` in your browser or curl it.
 - Check `ai_status`:
   - `"ok"`: The configured AI provider is working and communicating properly.
@@ -256,7 +279,9 @@ To inspect the health and provider status without leaking secrets:
   - `"error: HTTP 401 (unauthorized)"`: The provided `AI_API_KEY` is invalid or expired.
 
 ### 2. Restarting Backend After Editing `.env`
+
 Note that `uvicorn --reload` watches Python source files, **not** `.env`. Whenever you modify `backend/.env`, restart the backend server:
+
 ```powershell
 # Stop running uvicorn process (Ctrl+C in terminal), then restart:
 cd backend
@@ -264,7 +289,9 @@ cd backend
 ```
 
 ### 3. Freeing Port 8000 on Windows
+
 If you encounter `[WinError 10013]` or `[Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000)`, an existing process may be holding port 8000:
+
 ```powershell
 # 1. Find the PID using port 8000
 netstat -ano | findstr :8000
@@ -272,7 +299,9 @@ netstat -ano | findstr :8000
 # 2. Stop the process by PID (e.g., if PID is 14240)
 Stop-Process -Id 14240 -Force
 ```
+
 If port 8000 is reserved by Windows exclusion ranges, you can also specify a free port:
+
 ```powershell
 .\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8080
 ```
@@ -306,7 +335,7 @@ Catalogue products include image URLs mapped to local asset illustrations or hos
 
 ## Screenshots
 
-> *Screenshots from the working application (placeholders below; images are stored in `docs/screenshots/`)*
+> *Screenshots from the working application (stored in `docs/screenshots/`)*
 
 | Overview & Mission Control | Spending Guardrails & Permissions |
 | :---: | :---: |
