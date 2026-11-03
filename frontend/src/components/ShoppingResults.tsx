@@ -54,7 +54,7 @@ export const ShoppingResults: React.FC<ShoppingResultsProps> = ({
       </div>
 
       {/* 2. Candidate Alternatives Comparison (if any) */}
-      {alternatives.length > 0 && (
+      {alternatives.length > 0 ? (
         <div className="alternatives-section">
           <div className="alternatives-header">
             <h4>
@@ -125,7 +125,19 @@ export const ShoppingResults: React.FC<ShoppingResultsProps> = ({
             })}
           </div>
         </div>
-      )}
+      ) : proposal.policy_decision === 'BLOCKED' ? (
+        <div className="alternatives-section">
+          <div className="alternatives-header">
+            <h4>
+              <span>ℹ️</span>
+              <span>No In-Policy Alternatives</span>
+            </h4>
+            <span className="alternatives-subtitle">
+              No in-policy alternative found in this category.
+            </span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

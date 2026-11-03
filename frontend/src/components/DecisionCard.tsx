@@ -488,6 +488,20 @@ export default function DecisionCard({ proposal: initialProposal, onPaymentSucce
                 </div>
               </div>
             )}
+
+            {proposal.policy_decision === 'BLOCKED' && (!proposal.alternatives || proposal.alternatives.length === 0) && (
+              <div style={{
+                marginTop: '1rem',
+                padding: '0.75rem 1rem',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                border: '1px dashed var(--border-subtle)',
+                fontSize: '0.84rem',
+                color: 'var(--text-muted)',
+              }}>
+                No in-policy alternative found in this category.
+              </div>
+            )}
           </div>
         )}
       </div>

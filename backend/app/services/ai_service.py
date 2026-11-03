@@ -78,7 +78,11 @@ class AIProposalResult(BaseModel):
     ai_mode: str  # "live" | "fallback"
 
 
-def _deterministic_fallback(user_request: str, catalogue: list[dict[str, Any]]) -> AIRecommendation:
+def _deterministic_fallback(
+    user_request: str,
+    catalogue: list[dict[str, Any]],
+    error_type: Optional[str] = None,
+) -> AIRecommendation:
     """
     Deterministic rule-based keyword matcher when no live LLM API is available.
     Guarantees a valid product_id from the provided catalogue and provides a ranked list
@@ -121,7 +125,7 @@ def _deterministic_fallback(user_request: str, catalogue: list[dict[str, Any]]) 
             score += 10
         if "keyboard" in req_lower and "keyboard" in name:
             score += 10
-        if "headset" in req_lower and "headset" in name:
+        if any(w in req_lower for w in ["headset", "audio", "headphone", "earphone", "earbud"]) and ("headset" in name or "audio" in name or "earbud" in name):
             score += 10
         if "hub" in req_lower and "hub" in name:
             score += 10
@@ -154,8 +158,12 @@ def _deterministic_fallback(user_request: str, catalogue: list[dict[str, Any]]) 
         matched.append(f"Found product category matching keywords: {best_product.get('name')}")
         if best_product.get("merchant_name"):
             matched.append(f"Sold by {best_product.get('merchant_name')}")
+        if error_type:
+            prefix = f"[Fallback: AI provider call failed ({error_type})]"
+        else:
+            prefix = "[Demo Fallback Mode - No LLM API Key Configured]"
         rationale = (
-            f"[Demo Fallback Mode - No LLM API Key Configured] "
+            f"{prefix} "
             f"Selected '{best_product.get('name')}' by deterministic keyword matching. "
             f"Note: Backend policy engine will independently enforce all budget and merchant rules."
         )
@@ -310,6 +318,7 @@ def generate_block_explanation(
     reasons: list[str],
     explanations: list[str],
     ai_mode: str,
+    has_alternatives: bool = True,
 ) -> str:
     """
     Generate a plain-English explanation for why a purchase was blocked.
@@ -331,21 +340,34 @@ def generate_block_explanation(
             parts.append("did not pass your active spending policy checks")
 
         joined = " and ".join(parts)
-        return (
-            f"'{product_name}' was blocked because it {joined}. "
-            "Here are approved alternatives within your spending rules:"
-        )
+        if has_alternatives:
+            return (
+                f"'{product_name}' was blocked because it {joined}. "
+                "Here are approved alternatives within your spending rules:"
+            )
+        else:
+            return (
+                f"'{product_name}' was blocked because it {joined}. "
+                "No in-policy alternative found in this category."
+            )
 
     if ai_mode != "live" or not settings.ai_configured or settings.ai_provider.lower() not in ("openai", "gemini"):
         return _fallback_explanation()
 
     try:
         import httpx
-        system_prompt = (
-            "You are an assistant for AgentPay Guard. "
-            "Write a concise, friendly 1-2 sentence explanation of why a purchase proposal was blocked, "
-            "and introduce safer alternatives. State the product name and reason clearly without jargon."
-        )
+        if has_alternatives:
+            system_prompt = (
+                "You are an assistant for AgentPay Guard. "
+                "Write a concise, friendly 1-2 sentence explanation of why a purchase proposal was blocked, "
+                "and introduce safer alternatives. State the product name and reason clearly without jargon."
+            )
+        else:
+            system_prompt = (
+                "You are an assistant for AgentPay Guard. "
+                "Write a concise, friendly 1-2 sentence explanation of why a purchase proposal was blocked, "
+                "and state: 'No in-policy alternative found in this category.' State the product name and reason clearly without jargon."
+            )
         user_prompt = (
             f"User asked for: {user_request}\n"
             f"Product: {product_name}\n"
@@ -523,9 +545,11 @@ def generate_recommendation(
         import httpx
 
         sanitized_msg = _sanitize_message(str(exc), settings.ai_api_key)
+        error_type = "error"
 
         if isinstance(exc, httpx.HTTPStatusError):
             code = exc.response.status_code
+            error_type = str(code)
             try:
                 err_json = exc.response.json()
                 raw_err = str(err_json.get("error", {}).get("message", exc.response.text))
@@ -540,12 +564,13 @@ def generate_recommendation(
                 logger.warning("AI provider HTTP error (HTTP %d): %s", code, sanitized_msg)
                 set_ai_status(f"error: HTTP {code}")
         elif isinstance(exc, httpx.TimeoutException):
+            error_type = "timeout"
             logger.warning("AI provider request timed out (%s)", type(exc).__name__)
             set_ai_status("error: timeout")
         else:
+            error_type = type(exc).__name__
             logger.warning("AI provider error (%s): %s", type(exc).__name__, sanitized_msg)
             set_ai_status(f"error: {type(exc).__name__}")
 
-        fallback = _deterministic_fallback(user_request, catalogue)
-        fallback.rationale = f"[Fallback: AI provider error] {fallback.rationale}"
+        fallback = _deterministic_fallback(user_request, catalogue, error_type=error_type)
         return AIProposalResult(recommendation=fallback, ai_mode="fallback")

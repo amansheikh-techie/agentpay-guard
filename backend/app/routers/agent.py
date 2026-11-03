@@ -296,48 +296,57 @@ def propose_purchase(
     block_explanation = None
 
     if primary_decision.decision == "BLOCKED":
+        # Category-aware candidate collection: only suggest in-policy products from the same category
+        target_category = primary_product.category if primary_product else None
+        candidate_map: dict[str, tuple[Product, str]] = {}
+        seen_cand_ids = {primary_product.id} if primary_product else set()
+
+        if target_category:
+            # 1. From AI recommendations if they match category
+            for cand in rec.candidates:
+                cand_prod = product_map.get(cand.product_id)
+                if cand_prod and cand_prod.category == target_category and cand.product_id not in seen_cand_ids:
+                    candidate_map[cand.product_id] = (cand_prod, cand.reason or f"Suggested alternative ({cand_prod.name})")
+                    seen_cand_ids.add(cand.product_id)
+
+            # 2. From all other catalogue products in the same category
+            for p in products:
+                if p.category == target_category and p.id not in seen_cand_ids:
+                    candidate_map[p.id] = (p, f"In-policy catalogue alternative ({p.name})")
+                    seen_cand_ids.add(p.id)
+
+            # Rank candidates by closeness in price to the primary product
+            ref_price = primary_product.price_cents if primary_product else 0
+            sorted_candidates = sorted(
+                candidate_map.values(),
+                key=lambda item: (abs(item[0].price_cents - ref_price), item[0].price_cents)
+            )
+
+            allowed_alternatives: list[tuple[Product, str]] = []
+            for cand_prod, cand_reason in sorted_candidates:
+                cand_snap = ProductSnapshot(
+                    id=cand_prod.id,
+                    price_cents=cand_prod.price_cents,
+                    currency=cand_prod.currency,
+                    merchant_id=cand_prod.merchant_id,
+                    category=cand_prod.category,
+                )
+                cand_decision = evaluate_proposal(policy_snap, cand_snap)
+                if cand_decision.decision == "ALLOWED":
+                    allowed_alternatives.append((cand_prod, cand_reason))
+                    if len(allowed_alternatives) >= 2:
+                        break
+        else:
+            allowed_alternatives = []
+
         block_explanation = ai_service.generate_block_explanation(
             user_request=payload.user_request,
             product_name=primary_product.name if primary_product else rec.product_id,
             reasons=primary_decision.reasons,
             explanations=primary_decision.explanations,
             ai_mode=ai_result.ai_mode,
+            has_alternatives=bool(allowed_alternatives),
         )
-
-        # Collect candidate product IDs to inspect: first AI candidates, then catalogue fallback
-        candidate_queue: list[tuple[str, str]] = []  # (product_id, reason)
-        seen_cand_ids = {primary_product.id} if primary_product else set()
-
-        # From AI candidates
-        for cand in rec.candidates:
-            if cand.product_id in product_map and cand.product_id not in seen_cand_ids:
-                candidate_queue.append((cand.product_id, cand.reason or "Suggested alternative"))
-                seen_cand_ids.add(cand.product_id)
-
-        # Fill queue with remaining catalogue products (sorted by price) if needed
-        for p in sorted(products, key=lambda x: x.price_cents):
-            if p.id not in seen_cand_ids:
-                candidate_queue.append((p.id, f"In-policy catalogue alternative ({p.name})"))
-                seen_cand_ids.add(p.id)
-
-        allowed_alternatives: list[tuple[Product, str]] = []
-        for cand_id, cand_reason in candidate_queue:
-            cand_prod = product_map.get(cand_id)
-            if not cand_prod:
-                continue
-
-            cand_snap = ProductSnapshot(
-                id=cand_prod.id,
-                price_cents=cand_prod.price_cents,
-                currency=cand_prod.currency,
-                merchant_id=cand_prod.merchant_id,
-                category=cand_prod.category,
-            )
-            cand_decision = evaluate_proposal(policy_snap, cand_snap)
-            if cand_decision.decision == "ALLOWED":
-                allowed_alternatives.append((cand_prod, cand_reason))
-                if len(allowed_alternatives) >= 2:
-                    break
 
         # Persist each alternative as its own Proposal row so it can be approved
         alt_ids = []
