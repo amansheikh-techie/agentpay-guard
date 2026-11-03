@@ -327,7 +327,7 @@ Catalogue products include image URLs mapped to local asset illustrations or hos
 
 ## Screenshots
 
-> *Screenshots from the working application (placeholders below; images are stored in `docs/screenshots/`)*
+> *Screenshots from the working application (stored in `docs/screenshots/`)*
 
 | Overview & Mission Control | Spending Guardrails & Permissions |
 | :---: | :---: |
