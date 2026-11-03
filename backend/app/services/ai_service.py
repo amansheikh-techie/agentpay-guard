@@ -253,7 +253,8 @@ def _call_openai(user_request: str, catalogue: list[dict[str, Any]], settings: A
         "STRICT SECURITY RULES:\n"
         "1. You MUST select product_ids that appear in the catalogue.\n"
         "2. You DO NOT determine price, policy eligibility, remaining budget, or payment approval.\n"
-        "3. Output MUST be valid JSON adhering strictly to this schema:\n"
+        "3. Keep rationale short, concise, and spoken-friendly (1-2 sentences, plain text only, no markdown, no emojis). Do NOT state prices or policy verdicts.\n"
+        "4. Output MUST be valid JSON adhering strictly to this schema:\n"
         "{\n"
         '  "product_id": "<exact_primary_id_from_catalogue>",\n'
         '  "rationale": "<why this product fits user request>",\n'

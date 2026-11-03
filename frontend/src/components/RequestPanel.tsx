@@ -1,6 +1,17 @@
 // components/RequestPanel.tsx — Natural-language shopping request form wired to POST /api/agent/propose
-import { useState } from 'react';
-import { Send, Sparkles, AlertCircle } from 'lucide-react';
+// Featuring Voice Assistant integration (Web Speech API Recognition & SpeechSynthesis)
+import { useState, useEffect, useRef } from 'react';
+import {
+  Send,
+  Sparkles,
+  AlertCircle,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Square,
+  Radio,
+} from 'lucide-react';
 import { propose } from '../api/client';
 import type { Proposal } from '../types';
 
@@ -29,40 +40,246 @@ const DEMO_SCENARIOS = [
   },
 ];
 
+// Browser Web Speech API SpeechRecognition compatibility constructor
+const getSpeechRecognitionClass = () => {
+  if (typeof window === 'undefined') return null;
+  const win = window as any;
+  return win.SpeechRecognition || win.webkitSpeechRecognition || null;
+};
+
 export default function RequestPanel({ onProposalCreated }: Props) {
   const [requestText, setRequestText] = useState('');
   const [selectedScenarioIndex, setSelectedScenarioIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = requestText.trim();
+  // Voice Assistant states
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SpeechClass = getSpeechRecognitionClass();
+    setSpeechSupported(!!SpeechClass);
+  }, []);
+
+  // Cleanup speech synthesis on unmount
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
+  // Voice synthesizer helper preferring en-IN or en-US voices
+  const speakVerdict = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || isMuted) {
+      return;
+    }
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+
+    // Prefer Indian English or US English voices
+    const preferredVoice =
+      voices.find((v) => v.lang === 'en-IN') ||
+      voices.find((v) => v.lang === 'en_IN') ||
+      voices.find((v) => v.lang.startsWith('en-US')) ||
+      voices.find((v) => v.lang.startsWith('en')) ||
+      null;
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleStopSpeaking = () => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+  };
+
+  const handleToggleMute = () => {
+    if (!isMuted && isSpeaking) {
+      handleStopSpeaking();
+    }
+    setIsMuted((prev) => !prev);
+  };
+
+  const submitProposal = async (textToSubmit: string, mode: 'text' | 'voice' = 'text') => {
+    const clean = textToSubmit.trim();
     if (!clean || loading) return;
 
     setLoading(true);
     setError(null);
+    setSpeechError(null);
 
     try {
-      const proposal = await propose(clean);
+      const proposal = await propose(clean, mode);
       onProposalCreated(proposal);
-    } catch (err) {
-      setError((err as Error).message || 'Failed to submit shopping request.');
+
+      // Speak the deterministic verdict aloud if voice synthesis is enabled
+      if (proposal.spoken_response) {
+        speakVerdict(proposal.spoken_response);
+      }
+    } catch (err: unknown) {
+      const msg = (err as Error).message || 'Failed to submit shopping request.';
+      setError(msg);
+      if (mode === 'voice') {
+        speakVerdict('Speech unclear. Please repeat your shopping request mentioning the item you want.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const handleStartListening = () => {
+    const SpeechClass = getSpeechRecognitionClass();
+    if (!SpeechClass || loading) return;
+
+    setError(null);
+    setSpeechError(null);
+    handleStopSpeaking();
+
+    try {
+      const recognition = new (SpeechClass as any)();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setLiveTranscript('');
+      };
+
+      recognition.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+
+        for (let i = 0; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+
+        const current = final || interim;
+        setLiveTranscript(current);
+
+        if (final && final.trim().length >= 3) {
+          setRequestText(final.trim());
+          setSelectedScenarioIndex(null);
+          submitProposal(final.trim(), 'voice');
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        setIsListening(false);
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setSpeechError('Microphone permission denied. Please allow microphone access in your browser or type your request.');
+        } else if (event.error === 'no-speech') {
+          setSpeechError('No speech was detected. Please try clicking the mic again or type your request.');
+        } else if (event.error === 'network') {
+          setSpeechError('Speech recognition network error. Please check your connection or type your request.');
+        } else {
+          setSpeechError(`Voice input error (${event.error}). Please type your request below.`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Could not initialize speech recognition:', err);
+      setIsListening(false);
+      setSpeechError('Could not start microphone. Please type your shopping request.');
+    }
+  };
+
+  const handleStopListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+    setIsListening(false);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitProposal(requestText, 'text');
+  };
+
   return (
     <div className="card">
-      <div className="card-header">
-        <div className="card-icon">
-          <Sparkles size={18} />
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="card-icon">
+            <Sparkles size={18} />
+          </div>
+          <h2 style={{ margin: 0 }}>AI Shopping Agent</h2>
         </div>
-        <h2>AI Shopping Agent</h2>
+
+        {/* Audio control actions */}
+        <div className="voice-audio-controls">
+          {isSpeaking && (
+            <>
+              <span className="speaking-indicator">
+                <Radio size={12} /> Speaking
+              </span>
+              <button
+                type="button"
+                className="voice-ctrl-btn"
+                onClick={handleStopSpeaking}
+                title="Stop reading verdict aloud"
+              >
+                <Square size={12} /> Stop
+              </button>
+            </>
+          )}
+
+          <button
+            type="button"
+            className="voice-ctrl-btn"
+            onClick={handleToggleMute}
+            title={isMuted ? 'Unmute voice replies' : 'Mute voice replies'}
+          >
+            {isMuted ? <VolumeX size={14} color="var(--danger)" /> : <Volume2 size={14} color="var(--success)" />}
+            <span>{isMuted ? 'Muted' : 'Voice Reply ON'}</span>
+          </button>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', minWidth: 0 }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem', width: '100%', minWidth: 0 }}>
         {error && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', color: 'var(--danger)', fontSize: '0.8rem' }}>
             <AlertCircle size={15} />
@@ -70,16 +287,57 @@ export default function RequestPanel({ onProposalCreated }: Props) {
           </div>
         )}
 
+        {speechError && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem', background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 'var(--radius-md)', color: '#fbbf24', fontSize: '0.8rem' }}>
+            <AlertCircle size={15} />
+            <span>{speechError}</span>
+          </div>
+        )}
+
+        {/* Voice Assistant Interactive Bar (only when Web Speech API is supported) */}
+        {speechSupported && (
+          <div className="voice-toolbar">
+            <div className="voice-status-group">
+              <button
+                type="button"
+                className={`mic-btn ${isListening ? 'listening' : ''}`}
+                onClick={isListening ? handleStopListening : handleStartListening}
+                disabled={loading}
+                title={isListening ? 'Listening... click to stop' : 'Click to speak shopping request'}
+                aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+              >
+                {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+              </button>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span className="voice-status-text">
+                  {isListening ? 'Listening… speak your shopping request now' : 'Voice Assistant Ready'}
+                </span>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                  {isListening ? 'Say an item and price (e.g. "Find a mouse under $35")' : 'Click microphone to speak or type in the box below'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Live Speech Interim Transcript preview */}
+        {isListening && liveTranscript && (
+          <div className="voice-live-transcript">
+            <Radio size={14} className="spin-anim" />
+            <span>&ldquo;{liveTranscript}&rdquo;</span>
+          </div>
+        )}
+
         <div className="form-group" style={{ width: '100%', minWidth: 0 }}>
           <label className="form-label" htmlFor="shopping-request">
-            Natural-Language Request
+            Natural-Language Shopping Request
           </label>
           <textarea
             id="shopping-request"
             className="form-textarea"
             placeholder="e.g. Find a wireless mouse for work, under $35, from an approved merchant."
             value={requestText}
-            onChange={e => {
+            onChange={(e) => {
               const val = e.target.value;
               setRequestText(val);
               if (selectedScenarioIndex !== null && val !== DEMO_SCENARIOS[selectedScenarioIndex]?.text) {
@@ -111,9 +369,7 @@ export default function RequestPanel({ onProposalCreated }: Props) {
                   disabled={loading}
                   aria-pressed={isSelected}
                 >
-                  <span className={`scenario-chip ${s.chipClass}`}>
-                    {s.chip}
-                  </span>
+                  <span className={`scenario-chip ${s.chipClass}`}>{s.chip}</span>
                   <div className="scenario-text">{s.text}</div>
                   <div className="scenario-hint">{s.hint}</div>
                 </button>
@@ -142,7 +398,7 @@ export default function RequestPanel({ onProposalCreated }: Props) {
         </button>
 
         <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.45, margin: 0 }}>
-          🛡️ <strong>Trust Boundary</strong>: The AI model only selects a product ID. Product prices, merchant identity, and policy evaluation are authoritative on the server.
+          🎙️ <strong>Voice Boundary</strong>: Voice can propose products. Final payment approval stays an explicit human click in the Approvals tab.
         </p>
       </form>
     </div>

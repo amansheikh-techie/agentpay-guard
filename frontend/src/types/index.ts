@@ -56,9 +56,11 @@ export interface ExtractedRequirements {
 export interface Proposal {
   id: string;
   user_request: string;
+  input_mode?: "text" | "voice";
   selected_product_id: string | null;
   product: Product | null;
   rationale: string;
+  spoken_response?: string | null;
   status: string;
   policy_decision: PolicyDecision;
   decision_reasons: string[];

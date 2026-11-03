@@ -92,6 +92,7 @@ class ExtractedRequirements(BaseModel):
 
 class ProposeRequest(BaseModel):
     user_request: str = Field(..., max_length=1000)
+    input_mode: Literal["text", "voice"] = "text"
 
     @field_validator("user_request")
     @classmethod
@@ -105,9 +106,11 @@ class ProposeRequest(BaseModel):
 class ProposalRead(BaseModel):
     id: str
     user_request: str
+    input_mode: Optional[Literal["text", "voice"]] = "text"
     selected_product_id: Optional[str]
     product: Optional[ProductRead]
     rationale: str
+    spoken_response: Optional[str] = None
     status: str
     policy_decision: Literal["ALLOWED", "BLOCKED"]
     decision_reasons: list[str]

@@ -22,6 +22,7 @@ import {
   createOrder,
   captureOrder,
   cancelOrder,
+  resetPolicy,
 } from './api/client';
 import type { Policy, Proposal, AuditEvent, SummaryResponse, PaymentListItem, Product } from './types';
 
@@ -144,6 +145,7 @@ export default function App() {
   const handlePolicyUpdated = (updated: Policy) => {
     setPolicy(updated);
     loadSummary();
+    loadPayments();
     loadAudit();
   };
 
@@ -236,6 +238,14 @@ export default function App() {
             summary={summary}
             onNavigateToShopping={() => setActiveTab('shopping')}
             onNavigateToPermissions={() => setActiveTab('permissions')}
+            onResetDemo={async () => {
+              try {
+                const reset = await resetPolicy();
+                handlePolicyUpdated(reset);
+              } catch (err) {
+                console.error('Reset failed:', err);
+              }
+            }}
           />
         )}
 

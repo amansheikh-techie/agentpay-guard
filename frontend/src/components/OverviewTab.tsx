@@ -1,5 +1,6 @@
 // components/OverviewTab.tsx — Mission Control Dashboard Tab
-import React from 'react';
+import React, { useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 import type { Policy, SummaryResponse } from '../types';
 import { formatCents } from '../lib/format';
 import { SpendBar } from './SpendBar';
@@ -9,6 +10,7 @@ interface OverviewTabProps {
   summary: SummaryResponse | null;
   onNavigateToShopping: () => void;
   onNavigateToPermissions: () => void;
+  onResetDemo?: () => Promise<void> | void;
 }
 
 export const OverviewTab: React.FC<OverviewTabProps> = ({
@@ -16,7 +18,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   summary,
   onNavigateToShopping,
   onNavigateToPermissions,
+  onResetDemo,
 }) => {
+  const [resetting, setResetting] = useState(false);
   const totalBudgetCents = policy?.total_budget_cents || 10000;
   const completedCents = summary?.completed_cents ?? (policy?.successful_spend_cents || 0);
   const reservedCents = summary?.reserved_cents || 0;
@@ -26,6 +30,29 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     <div className="overview-tab">
       {/* 1. Spend Visualization Bar */}
       <div className="overview-hero card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Live Budget & Policy Allocation</h3>
+          {onResetDemo && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={async () => {
+                setResetting(true);
+                try {
+                  await onResetDemo();
+                } finally {
+                  setResetting(false);
+                }
+              }}
+              disabled={resetting}
+              style={{ fontSize: '0.75rem', gap: '0.35rem', padding: '0.3rem 0.6rem', color: 'var(--text-secondary)' }}
+              title="Reset policy counters and demo spend to pristine defaults"
+            >
+              <RotateCcw size={13} className={resetting ? 'spin-anim' : ''} />
+              Reset Demo
+            </button>
+          )}
+        </div>
         <SpendBar
           totalBudgetCents={totalBudgetCents}
           completedCents={completedCents}
