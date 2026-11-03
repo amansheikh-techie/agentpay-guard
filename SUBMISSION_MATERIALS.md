@@ -13,68 +13,45 @@
 
 AgentPay Guard provides an authoritative safety and policy layer between autonomous AI shopping agents and financial checkout. Users set granular spending caps and merchant allowlists; an AI recommends products from a catalogue; a deterministic backend policy engine independently verifies all rules; and the user explicitly authorizes every PayPal Sandbox payment before funds can be captured.
 
-## Inspiration
+### Inspiration & Problem Statement
 
-As AI agents move from answering questions to buying things, giving them unsupervised access to payment credentials creates real financial risk:
+As generative AI agents advance from passive text assistants to autonomous purchasing agents, allowing them direct, unsupervised access to payment credentials creates catastrophic financial risks:
 
-1. **Prompt injections and hallucinations:** An LLM cannot be the security boundary. If an attacker tricks the model into recommending an expensive item or a fraudulent store, an agent with autonomous payment authority will execute the charge.
-2. **Budget creep:** Without deterministic tracking, small automated purchases quickly blow past personal or organizational budgets.
-3. **The "check-out black box":** Users are reluctant to delegate purchasing to AI without full transparency and an explicit authorization gate.
+1. **Prompt Injections & Hallucinations:** An LLM cannot be the security boundary. If an attacker tricks the model into recommending a $500 item or buying from a fraudulent store, an agent with autonomous payment authority will execute the charge.
+2. **Budget Creep:** Without deterministic accumulation tracking, small automated purchases quickly blow past organizational or personal budgets.
+3. **The "Check-Out" Black Box:** Users are understandably reluctant to delegate purchasing to AI without complete transparency and an explicit authorization gate.
 
-## What it does
+### What It Does
 
-AgentPay Guard is an authoritative safety and policy layer between autonomous AI shopping agents and financial checkout. Users set spending caps and merchant allowlists; an AI recommends products from a catalogue; a deterministic backend policy engine independently verifies every rule; and the user explicitly authorizes every PayPal Sandbox payment before funds can be captured.
+AgentPay Guard demonstrates a practical architecture for safe, AI-assisted commerce:
 
-- **Deterministic trust boundary:** The AI agent only proposes product IDs. Authoritative pricing, merchant identity and policy evaluation run exclusively in server-side Python code.
-- **Spending policies:** Users set total budgets, per-order caps and merchant allowlists that are strictly enforced regardless of what the AI outputs.
-- **Mandatory human in the loop:** Even if an item is within policy, no payment order can be created without an explicit user authorization click.
-- **Immutable audit trail:** Every proposal, policy decision, approval, capture and cancellation is logged with timestamps and machine-readable reason codes.
+- **Deterministic Trust Boundary:** The AI agent only proposes product IDs. Authoritative pricing, merchant identity, and policy evaluation are executed exclusively by server-side Python code.
+- **Spending Policies:** Users set total budgets, per-order caps, and merchant allowlists that are strictly enforced regardless of what the AI outputs.
+- **Mandatory Human-in-the-Loop:** Even if an item is within policy limits, no payment order can be created without an explicit user authorization click.
+- **PayPal Sandbox Orders v2:** Uses server-side PayPal REST APIs with idempotency keys (`PayPal-Request-Id`) and server verification on capture to guarantee accurate reconciliation.
+- **Immutable Audit Trail:** Every proposal, policy decision, approval, capture, and cancellation is logged with millisecond timestamps and machine-readable reason codes.
 
-## How I built it
+### How the PayPal Developer Platform is Central
 
-**How the PayPal Developer Platform is central**
-PayPal is the core transaction engine of AgentPay Guard:
+The PayPal developer platform is the core transaction engine of AgentPay Guard:
 
-- **Server-side Orders v2 API:** Implemented in `backend/app/services/paypal_service.py` to create orders with `intent=CAPTURE`, using authoritative server-side prices converted from minor units (cents).
-- **OAuth 2.0 client credentials:** Tokens are obtained on the server with in-memory caching to minimize latency.
-- **Idempotency protection:** Every order creation and capture call includes a unique idempotency key (PayPal-Request-Id) to prevent accidental duplicate charges.
-- **Server verification on capture:** The app never marks a transaction successful based on frontend redirects or URL parameters. The backend verifies the PayPal response (status COMPLETED, matching amount and currency) before deducting from the budget.
-- **Clean cancellation flow:** If a user cancels in PayPal Sandbox, the transaction is marked cancelled without touching the budget.
-- **Environment:** USD only, PayPal Sandbox only, no real money.
+- **Server-Side Orders v2 API:** Implemented in `backend/app/services/paypal_service.py` to create orders with `intent=CAPTURE` using authoritative server-side prices converted from minor units (cents).
+- **OAuth 2.0 Client Credentials:** Tokens are obtained securely on the server with in-memory caching to minimize latency.
+- **Idempotency Protection:** Every order creation and capture call includes a unique idempotency key to prevent accidental duplicate charges.
+- **Server Verification on Capture:** The app never marks a transaction successful based solely on frontend redirects or URL parameters. The backend verifies the PayPal API response (`status=COMPLETED`, matched amount, and currency) before deducting from the user's budget.
+- **Clean Cancellation Flow:** If a user cancels in PayPal Sandbox, the transaction status is marked `cancelled` without touching the user's budget.
 
-**How AI is used**
+### How AI is Used
 
-- **Natural-language understanding:** Users describe what they want in plain English, for example "Find a wireless mouse for work, under $35, from an approved merchant."
-- **Catalogue-constrained recommendation:** The AI service receives the request together with the available catalogue metadata. The model's only job is to identify the user's intent and recommend a matching product ID with a structured rationale.
-- **Deterministic fallback mode:** When no external LLM API key is configured, the app switches to a keyword-matching fallback, clearly labelled in the UI as "Demo Fallback Mode". This lets evaluators test every flow without paid API keys.
+- **Natural-Language Understanding:** Users describe what they want in plain English (e.g., *"Find a wireless mouse for work, under $35, from an approved merchant"*).
+- **Catalogue-Constrained Recommendation:** The AI service receives the user request alongside the available catalogue metadata. The model's sole job is to identify user intent and recommend a matching `product_id` with a structured rationale.
+- **Robust Deterministic Fallback Mode:** When an external LLM API key is not configured, the platform activates a deterministic keyword-matching fallback engine clearly tagged in the UI as `Demo Fallback Mode`. This ensures evaluators can test all flows without needing paid API keys.
 
-**Stack:** React, Vite, TypeScript, FastAPI, Python, SQLite, PayPal Orders v2 (Sandbox).
+### What We Learned
 
-## Challenges I ran into
-
-- Making limits hold up in a real payment flow: in-flight orders had to count against the budget before capture, and capture had to be claimed atomically so a payment can't be counted twice.
-- Keeping approvals honest by binding each approval to the exact product, price, merchant and currency.
-- Avoiding floating-point errors in money by using integer cents end to end.
-- Keeping the dashboard consistent after "Reset demo" while preserving payment history and the audit trail.
-
-## Accomplishments that I'm proud of
-
-- 75/75 automated unit and integration tests passing in `pytest`, covering edge cases, policy violations and idempotency.
-- Zero secrets leaked: credentials stay in backend environment variables only.
-- A one-click demo reset that makes evaluations and live testing repeatable.
-
-## What I learned
-
-- **Separation of concerns:** Keep the generative layer isolated from the financial layer. The LLM suggests, deterministic code validates, and humans decide.
-- **Monetary precision:** Always use integer minor units (cents) to avoid IEEE-754 floating-point inaccuracies.
-- **Server-side truth:** Never accept pricing or merchant parameters from the client browser.
-
-## What's next for AgentPay Guard
-
-- Per-category budgets and recurring spending rules.
-- Multi-agent and multi-user permissions.
-- Mobile notifications for approval requests.
-- A production PayPal review for moving beyond Sandbox.
+- **Separation of Concerns:** Keep the generative layer strictly isolated from the financial layer. The LLM suggests; deterministic code validates; humans decide.
+- **Monetary Precision:** Always use integer minor units (cents) end-to-end to avoid IEEE-754 floating-point inaccuracies.
+- **Server-Side Truth:** Never accept pricing or merchant parameters from the client browser.
 
 ### Accomplishments We're Proud Of
 

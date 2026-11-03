@@ -69,8 +69,10 @@ def test_voice_request_over_limit_blocked(client, clean_test_db):
     spoken = data["spoken_response"]
     assert "Mechanical Keyboard" in spoken
     assert "$79.99 USD" in spoken
-    assert "BLOCKED" in spoken
-    assert "MAX_ORDER_AMOUNT_EXCEEDED" in spoken
+    assert "BLOCKED by MAX_ORDER_AMOUNT_EXCEEDED" in spoken
+    assert "cannot be approved" in spoken
+    assert "final approval is required" not in spoken.lower()
+    assert "approvals tab" not in spoken.lower()
 
 
 def test_unclear_voice_input_creates_no_proposal_or_order(client, clean_test_db):

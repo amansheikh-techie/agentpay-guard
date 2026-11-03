@@ -132,8 +132,7 @@ def _generate_spoken_response(
     if not product:
         return (
             "I could not identify an available product in the catalogue. "
-            "This proposal is BLOCKED by UNKNOWN_PRODUCT. "
-            "Please try asking for an available item."
+            "This proposal is BLOCKED by UNKNOWN_PRODUCT and cannot be approved."
         )
 
     amount_usd = f"${product.price_cents / 100:.2f}"
@@ -149,8 +148,7 @@ def _generate_spoken_response(
         rule_str = ", ".join(reasons) if reasons else "policy limit"
         return (
             f"Proposed {item_name} for {amount_usd} USD. "
-            f"This purchase is BLOCKED by {rule_str}. "
-            f"Checkout is disabled."
+            f"This purchase is BLOCKED by {rule_str} and cannot be approved."
         )
 
 

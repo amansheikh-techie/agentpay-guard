@@ -1546,7 +1546,7 @@ a:hover { text-decoration: underline; }
 }
 
 
-/* ── Voice Assistant UI (GCET ASCEND Showcase) ────────────────────────── */
+/* ── Voice Assistant UI ──────────────────────────────────────────────── */
 .voice-toolbar {
   display: flex;
   align-items: center;

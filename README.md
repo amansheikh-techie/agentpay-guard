@@ -49,9 +49,9 @@ FastAPI re-checks policy ──► PayPal Sandbox Orders API
 
 ---
 
-## Voice Assistant (GCET ASCEND Showcase)
+## Voice Assistant
 
-AgentPay Guard features a **Conversational Voice Assistant** tailored for the **GCET ASCEND** showcase (Theme: *Voice AI & Conversational Agents*).
+AgentPay Guard includes a **Conversational Voice Assistant** for hands-free shopping requests and spoken policy feedback.
 
 ### How It Works
 1. **Voice Input via Web Speech API:** Users click the microphone icon in the AI Shopping tab and speak their shopping request in natural language (e.g. *"Find an ergonomic wireless mouse under $35"*).

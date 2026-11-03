@@ -1,5 +1,4 @@
-# AgentPay Guard — GCET ASCEND Project Submission
-## Theme: Voice AI & Conversational Agents
+# AgentPay Guard — Voice Assistant Architecture & Specification
 
 ---
 
@@ -72,13 +71,4 @@ As artificial intelligence systems evolve from conversational text assistants in
 1. **Voice Boundary:** Voice is exclusively for conversational discovery. Voice can **never** authorize or pay.
 2. **Authority Invariant:** Spoken verdicts are generated deterministically in Python backend code from the rule engine result.
 3. **Deterministic Reset:** The "Reset Demo" capability restores budget and spend meters to pristine state without destroying historical audit logs.
-
----
-
-## 5. Team Contributions
-
-| Team Member | Role & Key Contributions |
-| :--- | :--- |
-| **Member 1: [Team Member 1 Name]** | Full-Stack Architecture, Deterministic Policy Engine, PayPal Sandbox Integration, and Backend Automated Test Suites. |
-| **Member 2: [Team Member 2 Name]** | Voice Assistant Integration (Web Speech API Recognition & SpeechSynthesis), Frontend UI/UX, and Showcase Scenarios. |
 

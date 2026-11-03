@@ -1,6 +1,6 @@
 # AgentPay Guard — Manual Test Scenarios Checklist (Voice Assistant & Safety Engine)
 
-This document provides a 10-scenario manual test checklist designed for verifying the **Voice AI & Conversational Agents** integration alongside the deterministic spending safety engine for the GCET ASCEND showcase and evaluators.
+This document provides a 10-scenario manual test checklist designed for verifying the Voice Assistant integration alongside the deterministic spending safety engine.
 
 ---
 
@@ -16,7 +16,7 @@ This document provides a 10-scenario manual test checklist designed for verifyin
 | # | Scenario Name | Test Steps | Expected Outcome | Verification Status |
 | :-: | :--- | :--- | :--- | :---: |
 | **1** | **Normal Purchase via Voice** | Click the microphone icon in AI Shopping tab. Say: *"Find a wireless mouse under $35 from an approved merchant"*. | Speech transcript appears in real time. Backend evaluates `ALLOWED`. Product card displays TechCore Wireless Mouse ($29.99). Spoken voice reads verdict aloud. | [ ] PASS |
-| **2** | **Over-Limit Request via Voice** | Click microphone icon. Say: *"I need a high-end mechanical keyboard for typing"*. | Proposal returned as `BLOCKED` with reason `MAX_ORDER_AMOUNT_EXCEEDED` ($79.99 > $40 cap). Voice reads block reason aloud and states checkout is disabled. Smart alternatives are displayed. | [ ] PASS |
+| **2** | **Over-Limit Request via Voice** | Click microphone icon. Say: *"I need a high-end mechanical keyboard for typing"*. | Proposal returned as `BLOCKED` with reason `MAX_ORDER_AMOUNT_EXCEEDED` ($79.99 > $40 cap). Voice states purchase is blocked by the named rule and cannot be approved. Smart alternatives are displayed. | [ ] PASS |
 | **3** | **Unclear Speech Rejection** | Click microphone icon. Say random noise or filler words (e.g. *"uh um hello"* or silence). | System rejects with 422 message: *"Speech unclear. Please repeat your shopping request with an item name or description"*. **No proposal row created in DB, no order created, no PayPal call made**. | [ ] PASS |
 | **4** | **Microphone Permission Denied** | In browser site settings (padlock in URL bar), set Microphone to **Block** and reload. Click the mic button. | Friendly amber banner appears: *"Microphone permission denied. Please allow microphone access in your browser or type your request."* UI remains fully functional. | [ ] PASS |
 | **5** | **Unsupported Browser Graceful Fallback** | Open application in a browser without Web Speech API (or disable recognition via browser flag). | Microphone button is cleanly hidden. Natural-language text input remains 100% active and functional. No runtime JavaScript crashes. | [ ] PASS |
