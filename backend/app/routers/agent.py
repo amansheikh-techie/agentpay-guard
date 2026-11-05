@@ -84,6 +84,74 @@ def _extract_requirements(
     return _keyword_extract_requirements(text)
 
 
+
+def _is_unclear_voice_input(text: str, catalogue_products: list[Product]) -> bool:
+    """
+    Deterministic check for voice input before calling LLM or creating orders.
+    Detects empty transcripts, short noise, or inputs lacking recognizable items/intent.
+    """
+    cleaned = text.strip().lower()
+    if len(cleaned) < 4:
+        return True
+
+    # Filler words or noise with no actionable intent
+    filler_only = {"uh", "um", "hmm", "hello", "hi", "hey", "test", "testing", "what", "audio", "mic"}
+    tokens = set(re.findall(r"\b[a-z0-9]+\b", cleaned))
+    if not tokens or tokens.issubset(filler_only):
+        return True
+
+    shopping_keywords = {
+        "buy", "find", "get", "need", "want", "purchase", "order", "mouse", "keyboard",
+        "headset", "lamp", "desk", "hub", "audio", "gadget", "charger", "cable", "stand",
+        "wireless", "ergonomic", "dollar", "dollars", "bucks", "cents", "under", "cheap",
+        "techcore", "homeplus", "officemate", "shadowtech", "office", "supplies"
+    }
+    for p in catalogue_products:
+        if p.name:
+            shopping_keywords.update(re.findall(r"\b[a-z0-9]+\b", p.name.lower()))
+        if p.category:
+            shopping_keywords.update(re.findall(r"\b[a-z0-9]+\b", p.category.lower()))
+        if p.merchant_name:
+            shopping_keywords.update(re.findall(r"\b[a-z0-9]+\b", p.merchant_name.lower()))
+
+    if not tokens.intersection(shopping_keywords):
+        return True
+
+    return False
+
+
+def _generate_spoken_response(
+    product: Optional[Product],
+    decision: str,
+    reasons: list[str],
+) -> str:
+    """
+    Deterministically generates the spoken response from rule engine outputs.
+    Guarantees item, USD amount, ALLOWED/BLOCKED with rule name, and approval reminder.
+    """
+    if not product:
+        return (
+            "I could not identify an available product in the catalogue. "
+            "This proposal is BLOCKED by UNKNOWN_PRODUCT and cannot be approved."
+        )
+
+    amount_usd = f"${product.price_cents / 100:.2f}"
+    item_name = product.name
+
+    if decision == "ALLOWED":
+        return (
+            f"Proposed {item_name} for {amount_usd} USD. "
+            f"This purchase is ALLOWED by your policy. "
+            f"Final approval is required in the Approvals tab."
+        )
+    else:
+        rule_str = ", ".join(reasons) if reasons else "policy limit"
+        return (
+            f"Proposed {item_name} for {amount_usd} USD. "
+            f"This purchase is BLOCKED by {rule_str} and cannot be approved."
+        )
+
+
 @router.post("/propose", response_model=ProposalRead, status_code=status.HTTP_201_CREATED)
 def propose_purchase(
     payload: ProposeRequest,
@@ -100,6 +168,13 @@ def propose_purchase(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Catalogue is currently unavailable.",
+        )
+
+    # Deterministic check for unclear voice input: creates no proposal, no order, no PayPal call
+    if payload.input_mode == "voice" and _is_unclear_voice_input(payload.user_request, products):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Speech unclear. Please repeat your shopping request with an item name or description.",
         )
 
     product_map = {p.id: p for p in products}
@@ -173,6 +248,12 @@ def propose_purchase(
         )
         primary_decision = evaluate_proposal(policy_snap, primary_snap)
 
+    primary_spoken = _generate_spoken_response(
+        primary_product,
+        primary_decision.decision,
+        primary_decision.reasons,
+    )
+
     # 6. Save Primary Proposal
     proposal_id = f"prop_{uuid.uuid4().hex[:12]}"
     primary_proposal = Proposal(
@@ -197,6 +278,7 @@ def propose_purchase(
         event_type="PROPOSAL_CREATED",
         details={
             "user_request": payload.user_request,
+            "input_mode": payload.input_mode,
             "product_id": primary_product.id if primary_product else None,
             "product_name": primary_product.name if primary_product else None,
             "price_cents": primary_product.price_cents if primary_product else None,
@@ -204,6 +286,7 @@ def propose_purchase(
             "reasons": primary_decision.reasons,
             "explanations": primary_decision.explanations,
             "ai_mode": ai_result.ai_mode,
+            "spoken_response": primary_spoken,
         },
         proposal_id=proposal_id,
     )
@@ -213,48 +296,57 @@ def propose_purchase(
     block_explanation = None
 
     if primary_decision.decision == "BLOCKED":
+        # Category-aware candidate collection: only suggest in-policy products from the same category
+        target_category = primary_product.category if primary_product else None
+        candidate_map: dict[str, tuple[Product, str]] = {}
+        seen_cand_ids = {primary_product.id} if primary_product else set()
+
+        if target_category:
+            # 1. From AI recommendations if they match category
+            for cand in rec.candidates:
+                cand_prod = product_map.get(cand.product_id)
+                if cand_prod and cand_prod.category == target_category and cand.product_id not in seen_cand_ids:
+                    candidate_map[cand.product_id] = (cand_prod, cand.reason or f"Suggested alternative ({cand_prod.name})")
+                    seen_cand_ids.add(cand.product_id)
+
+            # 2. From all other catalogue products in the same category
+            for p in products:
+                if p.category == target_category and p.id not in seen_cand_ids:
+                    candidate_map[p.id] = (p, f"In-policy catalogue alternative ({p.name})")
+                    seen_cand_ids.add(p.id)
+
+            # Rank candidates by closeness in price to the primary product
+            ref_price = primary_product.price_cents if primary_product else 0
+            sorted_candidates = sorted(
+                candidate_map.values(),
+                key=lambda item: (abs(item[0].price_cents - ref_price), item[0].price_cents)
+            )
+
+            allowed_alternatives: list[tuple[Product, str]] = []
+            for cand_prod, cand_reason in sorted_candidates:
+                cand_snap = ProductSnapshot(
+                    id=cand_prod.id,
+                    price_cents=cand_prod.price_cents,
+                    currency=cand_prod.currency,
+                    merchant_id=cand_prod.merchant_id,
+                    category=cand_prod.category,
+                )
+                cand_decision = evaluate_proposal(policy_snap, cand_snap)
+                if cand_decision.decision == "ALLOWED":
+                    allowed_alternatives.append((cand_prod, cand_reason))
+                    if len(allowed_alternatives) >= 2:
+                        break
+        else:
+            allowed_alternatives = []
+
         block_explanation = ai_service.generate_block_explanation(
             user_request=payload.user_request,
             product_name=primary_product.name if primary_product else rec.product_id,
             reasons=primary_decision.reasons,
             explanations=primary_decision.explanations,
             ai_mode=ai_result.ai_mode,
+            has_alternatives=bool(allowed_alternatives),
         )
-
-        # Collect candidate product IDs to inspect: first AI candidates, then catalogue fallback
-        candidate_queue: list[tuple[str, str]] = []  # (product_id, reason)
-        seen_cand_ids = {primary_product.id} if primary_product else set()
-
-        # From AI candidates
-        for cand in rec.candidates:
-            if cand.product_id in product_map and cand.product_id not in seen_cand_ids:
-                candidate_queue.append((cand.product_id, cand.reason or "Suggested alternative"))
-                seen_cand_ids.add(cand.product_id)
-
-        # Fill queue with remaining catalogue products (sorted by price) if needed
-        for p in sorted(products, key=lambda x: x.price_cents):
-            if p.id not in seen_cand_ids:
-                candidate_queue.append((p.id, f"In-policy catalogue alternative ({p.name})"))
-                seen_cand_ids.add(p.id)
-
-        allowed_alternatives: list[tuple[Product, str]] = []
-        for cand_id, cand_reason in candidate_queue:
-            cand_prod = product_map.get(cand_id)
-            if not cand_prod:
-                continue
-
-            cand_snap = ProductSnapshot(
-                id=cand_prod.id,
-                price_cents=cand_prod.price_cents,
-                currency=cand_prod.currency,
-                merchant_id=cand_prod.merchant_id,
-                category=cand_prod.category,
-            )
-            cand_decision = evaluate_proposal(policy_snap, cand_snap)
-            if cand_decision.decision == "ALLOWED":
-                allowed_alternatives.append((cand_prod, cand_reason))
-                if len(allowed_alternatives) >= 2:
-                    break
 
         # Persist each alternative as its own Proposal row so it can be approved
         alt_ids = []
@@ -289,13 +381,16 @@ def propose_purchase(
                 else 0
             )
 
+            alt_spoken = _generate_spoken_response(alt_prod, "ALLOWED", [])
             alternatives_read.append(
                 ProposalRead(
                     id=alt_id,
                     user_request=payload.user_request,
+                    input_mode=payload.input_mode,
                     selected_product_id=alt_prod.id,
                     product=ProductRead.model_validate(alt_prod),
                     rationale=alt_rationale,
+                    spoken_response=alt_spoken,
                     status=alt_proposal.status,
                     policy_decision="ALLOWED",
                     decision_reasons=[],
@@ -327,9 +422,11 @@ def propose_purchase(
     return ProposalRead(
         id=primary_proposal.id,
         user_request=primary_proposal.user_request,
+        input_mode=payload.input_mode,
         selected_product_id=primary_proposal.selected_product_id,
         product=ProductRead.model_validate(primary_product) if primary_product else None,
         rationale=primary_proposal.rationale,
+        spoken_response=primary_spoken,
         status=primary_proposal.status,
         policy_decision=primary_proposal.policy_decision,
         decision_reasons=primary_proposal.decision_reasons,

@@ -81,6 +81,19 @@ def mock_ai_fallback(monkeypatch):
     monkeypatch.setattr(settings, "ai_provider", "none")
 
 
+@pytest.fixture(autouse=True)
+def mock_paypal_offline(monkeypatch):
+    """Ensure test suite runs completely offline without real PayPal credentials or network calls."""
+    from app import config
+    from app.services import paypal_service
+    settings = config.get_settings()
+    monkeypatch.setattr(settings, "paypal_client_id", "mock_sandbox_client_id")
+    monkeypatch.setattr(settings, "paypal_client_secret", "mock_sandbox_client_secret")
+    monkeypatch.setattr(settings, "paypal_mode", "sandbox")
+    monkeypatch.setattr(settings, "paypal_base_url", "https://api-m.sandbox.paypal.com")
+    monkeypatch.setattr(paypal_service, "get_access_token", lambda: "mock_paypal_access_token")
+
+
 @pytest.fixture
 def client():
     app.dependency_overrides[get_db] = override_get_db

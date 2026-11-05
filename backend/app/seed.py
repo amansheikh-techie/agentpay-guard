@@ -63,6 +63,28 @@ DEMO_PRODUCTS = [
         "category": "peripherals",
         "features": ["TKL layout", "Brown switches", "RGB backlight", "USB-C cable"],
     },
+    {
+        "id": "tc-headset-lite",
+        "name": "[DEMO] TechCore Lite USB Headset",
+        "description": "Lightweight on-ear stereo headset with noise-cancelling mic and USB-A plug.",
+        "price_cents": 3299,   # $32.99
+        "currency": "USD",
+        "merchant_id": "techcore",
+        "merchant_name": "TechCore Electronics",
+        "category": "audio",
+        "features": ["Noise-cancelling mic", "USB-A stereo", "Inline mute and volume", "Adjustable headband"],
+    },
+    {
+        "id": "tc-earbuds-pro",
+        "name": "[DEMO] TechCore Wired Earbuds",
+        "description": "Compact wired in-ear earphones with inline mic and 3.5mm audio jack.",
+        "price_cents": 1999,   # $19.99
+        "currency": "USD",
+        "merchant_id": "techcore",
+        "merchant_name": "TechCore Electronics",
+        "category": "audio",
+        "features": ["In-line microphone", "3.5mm jack", "Tangle-free cable", "Noise-isolating ear tips"],
+    },
     # HomePlus Supplies
     {
         "id": "hp-desk-lamp",
@@ -100,7 +122,7 @@ DEMO_PRODUCTS = [
     # OfficeMate Pro
     {
         "id": "om-noise-headset",
-        "name": "[DEMO] OfficeMate NC Headset",
+        "name": "[DEMO] OfficeMate Noise-Cancelling Headset",
         "description": "Over-ear noise-cancelling headset optimised for video calls.",
         "price_cents": 8999,   # $89.99 — intentionally over a $80 cap for demo scenario B
         "currency": "USD",
@@ -180,11 +202,28 @@ def seed_if_empty(db: Session) -> None:
             db.add(product)
         db.commit()
     else:
-        # Backfill category for existing rows if needed
+        # Backfill category or insert newly added demo products
         for p in DEMO_PRODUCTS:
             prod = db.query(Product).filter(Product.id == p["id"]).first()
-            if prod and not prod.category:
-                prod.category = p.get("category", "peripherals")
+            if not prod:
+                new_prod = Product(
+                    id=p["id"],
+                    name=p["name"],
+                    description=p["description"],
+                    price_cents=p["price_cents"],
+                    currency=p["currency"],
+                    merchant_id=p["merchant_id"],
+                    merchant_name=p["merchant_name"],
+                    category=p.get("category", "peripherals"),
+                    active=True,
+                )
+                new_prod.features = p.get("features", [])
+                db.add(new_prod)
+            else:
+                if p.get("category") and prod.category != p.get("category"):
+                    prod.category = p.get("category")
+                if prod.name != p["name"]:
+                    prod.name = p["name"]
         db.commit()
 
     if db.query(Policy).count() == 0:

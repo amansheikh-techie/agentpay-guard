@@ -23,7 +23,8 @@ interface Props {
 }
 
 export default function DecisionCard({ proposal: initialProposal, onPaymentSuccess, onSelectAlternative }: Props) {
-  const [currentProposal, setCurrentProposal] = useState<Proposal | null>(initialProposal);
+  const [selectedAlternative, setSelectedAlternative] = useState<Proposal | null>(null);
+  const [prevInitialProposal, setPrevInitialProposal] = useState<Proposal | null>(initialProposal);
   const [creatingOrder, setCreatingOrder] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<{
@@ -35,14 +36,15 @@ export default function DecisionCard({ proposal: initialProposal, onPaymentSucce
   const [capturing, setCapturing] = useState(false);
   const [captureSuccess, setCaptureSuccess] = useState<string | null>(null);
 
-  useEffect(() => {
-    setCurrentProposal(initialProposal);
+  if (initialProposal !== prevInitialProposal) {
+    setPrevInitialProposal(initialProposal);
+    setSelectedAlternative(null);
     setCreatedOrder(null);
     setOrderError(null);
     setCaptureSuccess(null);
-  }, [initialProposal]);
+  }
 
-  const proposal = currentProposal;
+  const proposal = selectedAlternative ?? initialProposal;
 
   // On mount or when the page regains focus, check URL params for PayPal
   // return. PayPal redirects back with ?payment_status=approved&payment_id=...
@@ -129,7 +131,7 @@ export default function DecisionCard({ proposal: initialProposal, onPaymentSucce
   };
 
   const handleChooseAlternative = (alt: Proposal) => {
-    setCurrentProposal(alt);
+    setSelectedAlternative(alt);
     setCreatedOrder(null);
     setOrderError(null);
     setCaptureSuccess(null);
@@ -486,6 +488,20 @@ export default function DecisionCard({ proposal: initialProposal, onPaymentSucce
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            {proposal.policy_decision === 'BLOCKED' && (!proposal.alternatives || proposal.alternatives.length === 0) && (
+              <div style={{
+                marginTop: '1rem',
+                padding: '0.75rem 1rem',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                border: '1px dashed var(--border-subtle)',
+                fontSize: '0.84rem',
+                color: 'var(--text-muted)',
+              }}>
+                No in-policy alternative found in this category.
               </div>
             )}
           </div>

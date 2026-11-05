@@ -36,7 +36,10 @@ def get_summary(db: Session = Depends(get_db)):
     daily_spent = daily_spent_cents(db)
     monthly_spent = monthly_spent_cents(db)
 
-    blocked_count = db.query(Proposal).filter(Proposal.policy_decision == "BLOCKED").count()
+    blocked_query = db.query(Proposal).filter(Proposal.policy_decision == "BLOCKED")
+    if last_reset_at:
+        blocked_query = blocked_query.filter(Proposal.created_at >= last_reset_at)
+    blocked_count = blocked_query.count()
 
     comp_count_query = db.query(Payment).filter(Payment.status == "captured")
     fail_count_query = db.query(Payment).filter(Payment.status.in_(["cancelled", "failed"]))

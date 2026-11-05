@@ -1,5 +1,5 @@
 // components/PermissionCenter.tsx — Complete Agent Spending Governance Tab
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import type { Policy, Product } from '../types';
 import { formatCents } from '../lib/format';
 import { updatePolicy, resetPolicy } from '../api/client';
@@ -32,19 +32,19 @@ export const PermissionCenter: React.FC<PermissionCenterProps> = ({
   const [showAdminTokenModal, setShowAdminTokenModal] = useState<boolean>(false);
   const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
 
-  // Sync state from policy prop
-  useEffect(() => {
-    if (policy) {
-      setTotalBudgetCents(policy.total_budget_cents);
-      setMaxPerOrderCents(policy.max_per_order_cents);
-      setDailyLimitCents(policy.daily_limit_cents || 0);
-      setMonthlyLimitCents(policy.monthly_limit_cents || 0);
-      setApprovedMerchants(policy.approved_merchant_ids || []);
-      setBlockedCategories(policy.blocked_categories || []);
-      setRequireApproval(policy.require_approval);
-      setAgentEnabled(policy.agent_enabled !== false);
-    }
-  }, [policy]);
+  // Sync state from policy prop during render
+  const [prevPolicy, setPrevPolicy] = useState(policy);
+  if (policy && policy !== prevPolicy) {
+    setPrevPolicy(policy);
+    setTotalBudgetCents(policy.total_budget_cents);
+    setMaxPerOrderCents(policy.max_per_order_cents);
+    setDailyLimitCents(policy.daily_limit_cents || 0);
+    setMonthlyLimitCents(policy.monthly_limit_cents || 0);
+    setApprovedMerchants(policy.approved_merchant_ids || []);
+    setBlockedCategories(policy.blocked_categories || []);
+    setRequireApproval(policy.require_approval);
+    setAgentEnabled(policy.agent_enabled !== false);
+  }
 
   // Derived merchant & category options from catalogue
   const allMerchants = React.useMemo(() => {
