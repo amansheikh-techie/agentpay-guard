@@ -39,6 +39,7 @@ The PayPal developer platform is the core transaction engine of AgentPay Guard:
 - **OAuth 2.0 Client Credentials:** Tokens are obtained securely on the server with in-memory caching to minimize latency.
 - **Idempotency Protection:** Every order creation and capture call includes a unique idempotency key to prevent accidental duplicate charges.
 - **Server Verification on Capture:** The app never marks a transaction successful based solely on frontend redirects or URL parameters. The backend verifies the PayPal API response (`status=COMPLETED`, matched amount, and currency) before deducting from the user's budget.
+- **Webhook Signature Verification:** Implemented in `backend/app/routers/payments.py` to cryptographically validate incoming notifications via PayPal's `/v1/notifications/verify-webhook-signature` endpoint.
 - **Clean Cancellation Flow:** If a user cancels in PayPal Sandbox, the transaction status is marked `cancelled` without touching the user's budget.
 
 ### How AI is Used
@@ -55,7 +56,7 @@ The PayPal developer platform is the core transaction engine of AgentPay Guard:
 
 ### Accomplishments We're Proud Of
 
-- 55/55 automated unit and integration tests passing in `pytest` covering edge cases, policy violations, and idempotency.
+- 89/89 automated unit and integration tests passing in `pytest` covering edge cases, policy violations, idempotency, webhook signature verification, and voice assistant capabilities.
 - Zero secrets leaked: credentials are kept strictly in backend environment variables.
 - One-click demo state reset to facilitate repeatable evaluations and live testing.
 
@@ -159,12 +160,14 @@ Capture these 5 screenshots for the Devpost gallery:
 - ✅ Deterministic policy engine enforcing caps, budget exhaustion, allowlists, and human approval gates
 - ✅ Server-side PayPal Sandbox Orders v2 creation and capture verification
 - ✅ Idempotency protection against duplicate captures and double budget spend
+- ✅ Cryptographic PayPal Webhook Signature Verification (`/v1/notifications/verify-webhook-signature`)
+- ✅ Conversational Voice Assistant with Web Speech API and accent support (`en-IN` / `en-US`)
 - ✅ Live interactive rule editor and demo state reset
 - ✅ Real-time immutable audit logging
-- ✅ 55/55 passing automated pytest tests and clean TypeScript build
+- ✅ 89/89 passing automated pytest tests and clean TypeScript build
 
 ### Future Roadmap (Post-Hackathon)
 
 - 🔮 Multi-tenant user accounts with role-based budget allocations (e.g. employee vs. manager limits)
-- 🔮 Real-time webhook listeners for asynchronous dispute and refund notifications
 - 🔮 Integration with PayPal Subscriptions and Vault API for recurring agent allowances
+- 🔮 Native mobile SDK wrappers for conversational agent integrations

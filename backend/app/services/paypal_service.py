@@ -231,3 +231,52 @@ def get_order_details(paypal_order_id: str) -> dict[str, Any]:
             return resp.json()
     except httpx.RequestError:
         raise PayPalError("Network error checking PayPal order status.")
+
+
+def verify_webhook_signature(
+    transmission_id: str,
+    transmission_time: str,
+    cert_url: str,
+    auth_algo: str,
+    transmission_sig: str,
+    webhook_event: dict[str, Any],
+    webhook_id: str | None = None,
+) -> bool:
+    """
+    Verify incoming PayPal webhook signature via PayPal Notifications API v1:
+    POST /v1/notifications/verify-webhook-signature
+    Returns True if verification_status == "SUCCESS", False otherwise.
+    """
+    settings = get_settings()
+    active_webhook_id = webhook_id or settings.paypal_webhook_id
+    if not active_webhook_id:
+        logger.warning("PAYPAL_WEBHOOK_ID not configured; rejecting webhook verification.")
+        return False
+
+    token = get_access_token()
+    url = f"{settings.paypal_base_url.rstrip('/')}/v1/notifications/verify-webhook-signature"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "transmission_id": transmission_id,
+        "transmission_time": transmission_time,
+        "cert_url": cert_url,
+        "auth_algo": auth_algo,
+        "transmission_sig": transmission_sig,
+        "webhook_id": active_webhook_id,
+        "webhook_event": webhook_event,
+    }
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("verification_status") == "SUCCESS"
+            logger.warning("PayPal webhook verification returned HTTP %s", resp.status_code)
+            return False
+    except Exception as exc:
+        logger.error("Error verifying PayPal webhook signature: %s", exc)
+        return False

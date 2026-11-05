@@ -830,3 +830,129 @@ def test_policy_endpoints_require_admin_token_outside_development(client):
         )
         assert res5.status_code == 200
         assert res5.json()["total_budget_cents"] == 10000
+
+
+def test_webhook_missing_signature_headers_rejected(client):
+    """Webhook request without required PayPal signature headers returns 400 and records audit event."""
+    res = client.post("/api/payments/webhook", json={"event_type": "PAYMENT.CAPTURE.COMPLETED"})
+    assert res.status_code == 400
+    assert "Missing required PayPal webhook signature headers" in res.json()["detail"]
+
+    # Verify audit event logged
+    audit_res = client.get("/api/audit")
+    events = [e["event_type"] for e in audit_res.json()]
+    assert "PAYPAL_WEBHOOK_REJECTED" in events
+
+
+def test_webhook_invalid_signature_rejected(client):
+    """Webhook request with invalid PayPal signature returns 400 and is rejected."""
+    headers = {
+        "paypal-transmission-id": "trans_test_123",
+        "paypal-transmission-time": "2026-11-05T12:00:00Z",
+        "paypal-cert-url": "https://api.sandbox.paypal.com/v1/notifications/certs/CERT-123",
+        "paypal-auth-algo": "SHA256withRSA",
+        "paypal-transmission-sig": "invalid_signature_string",
+    }
+
+    with patch("app.services.paypal_service.verify_webhook_signature", return_value=False):
+        res = client.post(
+            "/api/payments/webhook",
+            json={"event_type": "PAYMENT.CAPTURE.COMPLETED", "resource": {"id": "CAP-123"}},
+            headers=headers,
+        )
+        assert res.status_code == 400
+        assert "signature verification failed" in res.json()["detail"]
+
+
+def test_webhook_valid_signature_verified_and_reconciled(client):
+    """Verified webhook event records PAYPAL_WEBHOOK_VERIFIED audit event and reconciles pending payment."""
+    headers = {
+        "paypal-transmission-id": "trans_valid_999",
+        "paypal-transmission-time": "2026-11-05T12:00:00Z",
+        "paypal-cert-url": "https://api.sandbox.paypal.com/v1/notifications/certs/CERT-999",
+        "paypal-auth-algo": "SHA256withRSA",
+        "paypal-transmission-sig": "valid_mock_signature",
+    }
+
+    payload = {
+        "event_type": "PAYMENT.CAPTURE.COMPLETED",
+        "resource": {
+            "id": "CAPTURE-WEBHOOK-999",
+            "custom_id": "pay_webhook_test",
+        },
+    }
+
+    with patch("app.services.paypal_service.verify_webhook_signature", return_value=True):
+        res = client.post("/api/payments/webhook", json=payload, headers=headers)
+        assert res.status_code == 200
+        assert res.json()["status"] == "SUCCESS"
+        assert res.json()["event_type"] == "PAYMENT.CAPTURE.COMPLETED"
+
+    audit_res = client.get("/api/audit")
+    events = [e["event_type"] for e in audit_res.json()]
+    assert "PAYPAL_WEBHOOK_VERIFIED" in events
+
+
+def test_payment_guard_logic_blocks_over_limit_order_creation(client, allowed_proposal):
+    """Guard logic: if policy cap was lowered below proposal price before payment, checkout is blocked."""
+    # Lower per-order cap below $29.99 (2999 cents)
+    client.put("/api/policy", json={
+        "total_budget_cents": 10000,
+        "max_per_order_cents": 2000,  # $20.00 cap < $29.99 proposal
+        "currency": "USD",
+        "approved_merchant_ids": ["techcore"],
+        "require_approval": True,
+    })
+
+    with patch("app.config.Settings.paypal_configured", True):
+        res = client.post("/api/payments/create-order", json={
+            "proposal_id": allowed_proposal["id"],
+            "user_approved": True,
+        })
+        assert res.status_code == 400
+        assert "Live policy re-evaluation blocked checkout" in res.json()["detail"]
+        assert "per-order cap" in res.json()["detail"]
+
+
+def test_payment_guard_logic_prevents_duplicate_capture_deductions(client, allowed_proposal):
+    """Guard logic: duplicate capture requests for the same order do not double-deduct from budget."""
+    fake_order = {
+        "id": "PAYPAL-ORDER-DUP-TEST",
+        "links": [{"href": "https://approve.url", "rel": "approve"}],
+    }
+    fake_capture = {
+        "id": "PAYPAL-ORDER-DUP-TEST",
+        "status": "COMPLETED",
+        "purchase_units": [
+            {
+                "payments": {
+                    "captures": [
+                        {"id": "CAP-DUP-1", "status": "COMPLETED", "amount": {"value": "29.99", "currency_code": "USD"}}
+                    ]
+                }
+            }
+        ],
+    }
+
+    with patch("app.config.Settings.paypal_configured", True), \
+         patch("app.services.paypal_service.create_order", return_value=fake_order):
+        order_res = client.post("/api/payments/create-order", json={
+            "proposal_id": allowed_proposal["id"],
+            "user_approved": True,
+        })
+        paypal_order_id = order_res.json()["paypal_order_id"]
+
+    with patch("app.services.paypal_service.capture_order", return_value=fake_capture):
+        # First capture succeeds
+        cap1 = client.post("/api/payments/capture-order", json={"paypal_order_id": paypal_order_id})
+        assert cap1.status_code == 200
+
+        # Second duplicate capture is idempotent: returns existing payment or rejects duplicate spend
+        cap2 = client.post("/api/payments/capture-order", json={"paypal_order_id": paypal_order_id})
+        assert cap2.status_code == 200
+        assert cap2.json()["status"] == "captured"
+
+    # Check budget spend was deducted only once (2999 cents, not 5998 cents)
+    summary = client.get("/api/summary").json()
+    assert summary["completed_cents"] == 2999
+    assert summary["completed_count"] == 1

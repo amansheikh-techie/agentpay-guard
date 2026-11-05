@@ -1,15 +1,23 @@
 """
 database.py — SQLite engine and session factory.
 """
+from pathlib import Path
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-from app.config import get_settings
+from app.config import get_settings, BACKEND_DIR
 
 settings = get_settings()
 
+# Ensure parent directory exists for file-based SQLite database
+db_url = settings.effective_database_url
+if db_url.startswith("sqlite:///") and ":memory:" not in db_url:
+    raw_path = db_url[len("sqlite:///"):]
+    p = Path(raw_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
 engine = create_engine(
-    settings.database_url,
+    db_url,
     connect_args={"check_same_thread": False},  # required for SQLite + FastAPI
 )
 

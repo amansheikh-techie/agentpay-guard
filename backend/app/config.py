@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # App
     app_env: str = "development"
-    database_url: str = "sqlite:///./agentpay_guard.db"
+    database_url: str = "sqlite:///./data/agentpay_guard.db"
     frontend_origin: str = "http://localhost:5173"
     frontend_base_url: str = "http://localhost:5173"
     admin_token: str = ""
@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     paypal_client_secret: str = ""     # NEVER sent to frontend
     paypal_base_url: str = "https://api-m.sandbox.paypal.com"
     paypal_currency: str = "USD"
+    paypal_webhook_id: str = ""
 
     @field_validator("ai_provider", mode="before")
     @classmethod
@@ -103,6 +104,15 @@ class Settings(BaseSettings):
         if self.ai_provider == "gemini":
             return "https://generativelanguage.googleapis.com/v1beta/openai/"
         return "https://api.openai.com/v1/"
+
+    @property
+    def effective_database_url(self) -> str:
+        url = self.database_url
+        if url.startswith("sqlite:///./") or (url.startswith("sqlite:///") and not url.startswith("sqlite:////") and not (len(url) > 11 and url[10] == ":")):
+            rel_path = url[len("sqlite:///"):].lstrip("./")
+            abs_path = (BACKEND_DIR / rel_path).resolve().as_posix()
+            return f"sqlite:///{abs_path}"
+        return url
 
     @property
     def effective_ai_base_url(self) -> str:

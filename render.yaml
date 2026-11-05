@@ -14,6 +14,8 @@ services:
         value: none
       - key: PAYPAL_MODE
         value: sandbox
+      - key: DATABASE_URL
+        value: "sqlite:///./data/agentpay_guard.db"
       - key: FRONTEND_ORIGIN
         value: "https://agentpay-guard-zcet.onrender.com"
       # TODO: Set FRONTEND_BASE_URL to your real deployed URL for PayPal return/cancel redirects; do not guess it.

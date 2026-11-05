@@ -26,3 +26,7 @@ def log(
     db.commit()
     db.refresh(event)
     return event
+
+
+# Alias for backward/forward compatibility
+log_event = log

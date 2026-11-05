@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -723,3 +723,93 @@ def get_payment(payment_id: str, db: Session = Depends(get_db)):
             detail=f"Payment '{payment_id}' was not found.",
         )
     return payment
+
+
+@router.post("/webhook")
+async def handle_paypal_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    PayPal Sandbox Webhook Receiver.
+    Validates webhook signature via PayPal Notifications API v1 before processing.
+    Reconciles asynchronous events (e.g. PAYMENT.CAPTURE.COMPLETED) idempotently.
+    """
+    headers = request.headers
+    transmission_id = headers.get("paypal-transmission-id")
+    transmission_time = headers.get("paypal-transmission-time")
+    cert_url = headers.get("paypal-cert-url")
+    auth_algo = headers.get("paypal-auth-algo")
+    transmission_sig = headers.get("paypal-transmission-sig")
+
+    if not all([transmission_id, transmission_time, cert_url, auth_algo, transmission_sig]):
+        logger.warning("PayPal webhook rejected: missing required PayPal signature headers.")
+        audit_service.log(
+            db,
+            event_type="PAYPAL_WEBHOOK_REJECTED",
+            details={"reason": "MISSING_SIGNATURE_HEADERS"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required PayPal webhook signature headers.",
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload.")
+
+    is_valid = paypal_service.verify_webhook_signature(
+        transmission_id=transmission_id,
+        transmission_time=transmission_time,
+        cert_url=cert_url,
+        auth_algo=auth_algo,
+        transmission_sig=transmission_sig,
+        webhook_event=body,
+    )
+
+    if not is_valid:
+        logger.warning("PayPal webhook rejected: signature verification failed.")
+        audit_service.log(
+            db,
+            event_type="PAYPAL_WEBHOOK_REJECTED",
+            details={"reason": "INVALID_SIGNATURE", "transmission_id": transmission_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PayPal webhook signature verification failed.",
+        )
+
+    event_type = body.get("event_type", "UNKNOWN")
+    resource = body.get("resource", {})
+    resource_id = resource.get("id")
+
+    audit_service.log(
+        db,
+        event_type="PAYPAL_WEBHOOK_VERIFIED",
+        details={
+            "event_type": event_type,
+            "resource_id": resource_id,
+            "transmission_id": transmission_id,
+        },
+    )
+
+    # Idempotent reconciliation for asynchronous captures
+    if event_type == "PAYMENT.CAPTURE.COMPLETED":
+        custom_id = resource.get("custom_id")
+        supplementary_data = resource.get("supplementary_data", {})
+        paypal_order_id = supplementary_data.get("related_ids", {}).get("order_id")
+
+        query = db.query(Payment)
+        payment = None
+        if custom_id:
+            payment = query.filter(Payment.id == custom_id).first()
+        if not payment and paypal_order_id:
+            payment = query.filter(Payment.paypal_order_id == paypal_order_id).first()
+
+        if payment and payment.status == "pending":
+            payment.status = "captured"
+            payment.paypal_capture_id = resource_id
+            db.commit()
+
+    return {"status": "SUCCESS", "event_type": event_type}

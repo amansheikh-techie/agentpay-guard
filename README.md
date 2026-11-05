@@ -2,365 +2,239 @@
 
 > **Hackathon Prototype** — PayPal Sandbox only. No real money. Not a production financial product.
 
-Deterministic spending guardrails, human-in-the-loop approvals, and conversational voice assistance for autonomous AI commerce.
+Deterministic spending guardrails, human-in-the-loop approvals, verified PayPal Sandbox payments, and conversational voice assistance for autonomous AI commerce. Built for the **PayPal AI Hackathon 2026**.
 
 - **Live Demo:** [https://agentpay-guard-zcet.onrender.com](https://agentpay-guard-zcet.onrender.com)
 - **Demo Video:** [Watch Demo Video (AgentPay_Guard_demo_final.mp4)](https://github.com/amansheikh-techie/agentpay-guard/releases/tag/v1.0.0) *(Placeholder)*
+- **Repository:** [https://github.com/amansheikh-techie/agentpay-guard](https://github.com/amansheikh-techie/agentpay-guard)
 
-A safety layer for AI-assisted commerce built for the **PayPal AI Hackathon 2026**.
+---
 
-A user defines spending limits and approved merchants. An AI agent proposes a product from a controlled catalogue. A **deterministic backend policy engine** checks the proposal independently of the AI. The user must explicitly approve any eligible purchase before PayPal Sandbox checkout. The backend verifies the payment capture before recording a successful transaction.
+## The Problem
 
-**Core principle:** AI proposes → deterministic rules decide → human approves → backend verifies.
+Autonomous AI purchasing agents are evolving rapidly from passive recommenders into proactive decision-makers with direct access to checkout interfaces. However, granting generative AI unsupervised payment authority introduces critical financial vulnerabilities:
+
+1. **Prompt Injection & Hallucination:** An LLM cannot be the security boundary. Attackers or hallucinations can mislead an agent into proposing unauthorized $500 items or buying from malicious merchants.
+2. **Budget Creep:** Automated, unmonitored micro-transactions rapidly deplete personal and organizational budgets without deterministic accumulation limits.
+3. **The Checkout Black Box:** Users will not trust autonomous commerce without complete transparency, verifiable policy checks, and an explicit human-in-the-loop approval gate.
+
+### Core Principle
+
+> **AI proposes → deterministic rules decide → human approves → backend verifies.**
+
+The AI agent proposes product IDs and natural-language rationales, but **never** determines prices, merchant legitimacy, policy outcomes, or payment statuses. All financial guardrails and PayPal transaction verifications are executed exclusively by backend server code.
 
 ---
 
 ## Architecture
 
-```text
-React UI  ──────── natural-language request ──────► FastAPI
-   │                                                    │
-   │                                        ┌───────────┤
-   │                                        │  AI provider (proposal only)
-   │                                        │  Catalogue  (authoritative data)
-   │                                        │  Policy engine (deterministic)
-   │◄───────── proposal + ALLOWED/BLOCKED ──┘
-   │
-   │  user explicitly clicks Approve
-   ▼
-FastAPI re-checks policy ──► PayPal Sandbox Orders API
-   ▲                                │
-   └──── verify/capture ◄─── buyer approval in PayPal
-   │
-   └──► SQLite: proposals, payments, audit events, budget state
+```mermaid
+flowchart TD
+    subgraph Client ["Frontend (React 19 + TypeScript + Web Speech API)"]
+        UI["Dashboard & AI Shopping UI"]
+        Mic["Voice Assistant (en-IN / en-US)"]
+        ApproveBtn["Mandatory Human Approval Gate"]
+    end
+
+    subgraph Backend ["FastAPI Authoritative Backend (Python 3.11)"]
+        Router["Agent & Payment Routers"]
+        PolicyEngine["Deterministic Policy Engine"]
+        DB[(SQLite Persistence)]
+        AuditLog["Immutable Audit Trail"]
+        Adapter["AI Adapter (Gemini / OpenAI / Fallback)"]
+    end
+
+    subgraph PayPal ["PayPal Developer Platform (Sandbox)"]
+        OAuth["OAuth 2.0 Auth Server"]
+        OrdersAPI["Orders v2 API (intent=CAPTURE)"]
+        CaptureAPI["Payment Capture & Verification"]
+        WebhookAPI["Webhook Signature Verification"]
+    end
+
+    Mic -->|Speech-to-Text| UI
+    UI -->|1. Natural-Language Request| Router
+    Router -->|2. Request + Catalogue| Adapter
+    Adapter -->|3. Propose product_id only| Router
+    Router -->|4. Resolve Authoritative Price| DB
+    Router -->|5. Evaluate Spending Rules| PolicyEngine
+    PolicyEngine -->|6. Return ALLOWED / BLOCKED| UI
+    UI -->|7. Explicit User Approval Click| ApproveBtn
+    ApproveBtn -->|8. Request Order Creation| Router
+    Router -->|9. Create Sandbox Order| OrdersAPI
+    OrdersAPI -->|10. Return approve_url| UI
+    UI -->|11. Buyer Approves in Sandbox| PayPal
+    PayPal -->|12. Return with payment_status| UI
+    UI -->|13. Trigger Capture| Router
+    Router -->|14. Server-Side Capture| CaptureAPI
+    CaptureAPI -->|15. Verify Amount & Currency| Router
+    Router -->|16. Deduct Budget & Log Event| DB
+    PayPal -.->|Asynchronous Events| WebhookAPI
+    WebhookAPI -->|Verify Cryptographic Signature| Router
+    Router -->|Audit Webhook Event| AuditLog
 ```
 
-**Trust boundary:** The backend is authoritative. The AI never sets price, merchant, policy outcome, or payment status. The frontend never supplies an authoritative amount.
+### Trust Boundary & Security Invariants
+
+- **Authoritative Data:** Product prices, currencies, and merchant allowlists live in backend storage—client and AI inputs are strictly untrusted.
+- **Approval Binding Invariant:** When an order is created, an immutable cryptographic snapshot (`product_id`, `price_cents`, `merchant_id`, `currency`, and `policy_version`) is stored. Capture fails with `409 Conflict` if catalogue prices or merchant identities drift between approval and capture.
+- **Idempotent Reconciliation:** Every PayPal API call sends a unique `PayPal-Request-Id` idempotency key. Duplicate capture requests are deduplicated atomically without double deductions.
 
 ---
 
-## Key Features
+## How PayPal Developer Platform APIs Are Used
 
-- **Autonomous Agent Proposals:** Interprets natural-language shopping requests using Google Gemini (free tier) or OpenAI to identify matching items from a curated catalogue.
-- **Deterministic Spending Guardrails:** Enforces total budget limits, maximum per-order limits, daily limits, monthly limits, approved merchant allowlists, and category blocks independently of the AI.
-- **Approval Binding Invariant:** Binds proposal ID, product ID, merchant ID, price in cents, currency, and policy version at order creation; re-verifies all properties prior to capture.
-- **Smart Alternative Discovery:** When a requested purchase violates spending policy, the engine automatically explains the violation in plain English and recommends in-budget, allowable alternatives.
-- **Concurrency & Reservation Protection:** Automatically reserves funds for active in-flight orders, preventing race conditions and budget overages.
-- **Atomic Capture & Verification:** Directly calls PayPal Orders REST API to capture payments and verify amounts and transaction IDs before updating policy counters.
-- **Immutable Audit Trail:** Chronologically records all proposal generations, policy decisions, approvals, and captures in an append-only audit log.
-- **Non-Destructive Demo Reset:** Restores guardrail defaults for judge evaluations without deleting historical audit or payment rows.
+AgentPay Guard integrates deeply with the **PayPal Developer Platform (Sandbox)** to ensure secure, compliant AI-driven transactions:
 
----
-
-## Voice Assistant
-
-AgentPay Guard includes a **Conversational Voice Assistant** for hands-free shopping requests and spoken policy feedback.
-
-### How It Works
-
-1. **Voice Input via Web Speech API:** Users click the microphone icon in the AI Shopping tab and speak their shopping request in natural language (e.g. *"Find an ergonomic wireless mouse under $35"*).
-2. **Live Visual Transcript:** As the user speaks, interim recognition text is displayed in real-time with visual microphone pulse feedback.
-3. **Deterministic Spoken Replies:** Once the server evaluates the proposal against the spending policy, the assistant reads the verdict aloud using browser `window.speechSynthesis` (preferring `en-IN` or `en-US` voices).
-4. **Verifiable Verdict Contents:** Spoken replies state the proposed product name, authoritative USD price, policy outcome (`ALLOWED` or `BLOCKED` with the explicit rule name), and reminds the user that manual approval is required.
-5. **Interactive Audio Controls:** Users can mute/unmute voice replies or stop audio playback instantly via the header controls.
-
-### Hard Security Boundaries & Limitations
-
-- **Voice Cannot Authorize or Pay:** Voice is strictly an input/output discovery layer. No order can be created or payment captured without an explicit human click in the Approvals tab.
-- **Unclear Speech Rejection:** Deterministic backend validation rejects silent or unintelligible speech inputs with a helpful repeat prompt without generating database rows or calling payment APIs.
-- **Supported Browsers:** Google Chrome, Microsoft Edge, and modern Chromium-based browsers that support the standard Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`). In unsupported browsers, the microphone gracefully hides while typed natural-language shopping remains 100% operational.
-- **Environment:** USD only, PayPal Sandbox only — no real currency.
+| PayPal Capability | Implementation | Purpose & Security Guarantee |
+| ----------------- | -------------- | ---------------------------- |
+| **OAuth 2.0 Client Credentials** | `backend/app/services/paypal_service.py` (`get_access_token`) | Obtains short-lived bearer tokens via server-side Client ID and Secret; tokens are cached in memory to minimize latency. |
+| **Orders v2 API (`intent=CAPTURE`)** | `backend/app/services/paypal_service.py` (`create_order`) | Generates sandbox checkout orders using server-authoritative prices converted safely from minor units (cents to decimal string). |
+| **Idempotency Protection** | `PayPal-Request-Id: {payment_id}` | Prevents duplicate charge generation even during network retries or repeated browser submissions. |
+| **Server-Side Capture Verification** | `backend/app/services/paypal_service.py` (`capture_order`) | Directly calls PayPal to capture payment and verifies `status == "COMPLETED"`, currency, and exact amount before decrementing user budget. |
+| **Webhook Signature Verification** | `POST /api/payments/webhook` via `/v1/notifications/verify-webhook-signature` | Cryptographically validates incoming PayPal webhook transmissions (`paypal-transmission-sig`, `paypal-cert-url`) to protect against spoofing. |
+| **Cancellation Handling** | `POST /api/payments/cancel` | Cleanly marks orders as `cancelled` when buyer aborts in PayPal Sandbox, releasing reserved funds without touching spend totals. |
 
 ---
 
-## Tech Stack
+## Setup in Under 5 Steps
 
-| Layer       | Technology                                                     |
-| ----------- | -------------------------------------------------------------- |
-| Frontend    | React 19 + Vite + TypeScript                                   |
-| Backend     | Python 3.11 + FastAPI + Uvicorn                                |
-| Persistence | SQLite + SQLAlchemy 2                                          |
-| Validation  | Pydantic v2                                                    |
-| Payments    | PayPal Orders v2 REST API (Sandbox)                            |
-| AI          | OpenAI-compatible via provider adapter (Gemini / OpenAI) + deterministic fallback |
-| Tests       | pytest + FastAPI TestClient                                    |
+### 1. Clone the Repository
 
----
-
-## Prerequisites
-
-- **Python 3.11+** — `python --version`
-- **Node.js 18+** — `node --version`
-- **npm 9+** — `npm --version`
-- **Git** — `git --version`
-- A **PayPal Developer** account (free) for sandbox credentials: [https://developer.paypal.com/](https://developer.paypal.com/)
-- *(Optional)* A Google Gemini API key (free tier available at [Google AI Studio](https://aistudio.google.com/)) or an OpenAI API key for live AI mode; the app runs in deterministic fallback mode without one.
-
----
-
-## Setup (Windows PowerShell)
-
-### 1. Clone the repository
-
-```powershell
+```bash
 git clone https://github.com/amansheikh-techie/agentpay-guard.git
 cd agentpay-guard
 ```
 
-### 2. Backend setup
+### 2. Configure Environment Variables
 
-```powershell
-cd backend
-
-# Create and activate a virtual environment
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy the environment template
-Copy-Item .env.example .env
+```bash
+cp backend/.env.example backend/.env
 ```
 
-Open `backend\.env` in a text editor and fill in your credentials:
+Open `backend/.env` and insert your PayPal Sandbox credentials from [developer.paypal.com](https://developer.paypal.com/dashboard/applications/sandbox):
 
-```ini
-# PayPal Sandbox (required for payments)
+```dotenv
 PAYPAL_CLIENT_ID=your_sandbox_client_id
 PAYPAL_CLIENT_SECRET=your_sandbox_client_secret
-
-# AI Provider (optional — leave blank for deterministic fallback mode)
-AI_PROVIDER=gemini        # "gemini", "openai", or "none"
-AI_API_KEY=your_api_key
-AI_MODEL=gemini-2.5-flash # or "gpt-4o-mini"
-AI_BASE_URL=              # optional custom OpenAI-compatible base URL
-
-# Admin Security (optional in development; required in production)
-ADMIN_TOKEN=your_secure_admin_token
+PAYPAL_MODE=sandbox
+PAYPAL_CURRENCY=USD
+FRONTEND_BASE_URL=http://localhost:5173
 ```
 
-> **NEVER commit `.env` to Git.** It is listed in `.gitignore`.
+*(Optional: Set `AI_PROVIDER=gemini` and `AI_API_KEY=your_key` for live AI mode; without keys, the app runs in deterministic fallback mode automatically).*
 
-### 3. Run the backend
+### 3. Install Backend & Frontend Dependencies
 
-```powershell
-# From the backend/ directory, with .venv activated
-uvicorn app.main:app --reload --port 8000
-```
+```bash
+# Backend (Python 3.11+)
+cd backend
+python -m venv .venv
+.venv\Scripts\Activate.ps1    # On Windows (or 'source .venv/bin/activate' on Linux/macOS)
+pip install -r requirements.txt
+cd ..
 
-Verify: open [http://localhost:8000/api/health](http://localhost:8000/api/health) in your browser. You should see:
-
-```json
-{"status": "ok", "paypal_mode": "sandbox", ...}
-```
-
-Interactive API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-### 4. Frontend setup (new terminal)
-
-```powershell
+# Frontend (Node 18+)
 cd frontend
 npm install
+cd ..
+```
+
+### 4. Run the Application
+
+In terminal 1 (Backend):
+```bash
+cd backend
+.venv\Scripts\Activate.ps1
+uvicorn app.main:app --port 8000 --reload
+```
+
+In terminal 2 (Frontend):
+```bash
+cd frontend
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) — the dashboard should load and show "API Online" in the header.
+Open your browser at **`http://localhost:5173`**.
 
----
+### 5. Run Automated Tests
 
-## Running Tests
-
-```powershell
+```bash
 cd backend
 .venv\Scripts\Activate.ps1
-pytest tests/ -v
+pytest -v
 ```
+
+All 89 unit and integration tests run offline against an in-memory SQLite instance without incurring real network charges.
 
 ---
 
 ## Environment Variables
 
-| Variable               | Required | Description                                                                        |
-| ---------------------- | -------- | ---------------------------------------------------------------------------------- |
-| `APP_ENV`              | No       | `development` (default)                                                            |
-| `DATABASE_URL`         | No       | SQLite path, default `sqlite:///./agentpay_guard.db`                               |
-| `FRONTEND_ORIGIN`      | No       | CORS origin for frontend, default `http://localhost:5173`                          |
-| `FRONTEND_BASE_URL`    | No       | Base URL for PayPal return/cancel redirects, default `http://localhost:5173`       |
-| `ADMIN_TOKEN`          | No*      | Required outside `development` for `PUT /api/policy` and `POST /api/policy/reset`  |
-| `AI_PROVIDER`          | No       | `gemini`, `openai`, or `none` (fallback)                                           |
-| `AI_API_KEY`           | No       | Provider API key (e.g. Gemini free tier or OpenAI) — backend only, never in frontend |
-| `AI_MODEL`             | No       | Model name (e.g. `gemini-2.5-flash` or `gpt-4o-mini`)                              |
-| `AI_BASE_URL`          | No       | Custom base URL; defaults to Gemini/OpenAI standard endpoint                       |
-| `PAYPAL_MODE`          | Yes      | Must be `sandbox` for this project                                                 |
-| `PAYPAL_CLIENT_ID`     | Yes*     | Sandbox Client ID from developer.paypal.com                                        |
-| `PAYPAL_CLIENT_SECRET` | Yes*     | Sandbox Client Secret — **never commit or expose**                                 |
-| `PAYPAL_BASE_URL`      | No       | `https://api-m.sandbox.paypal.com`                                                 |
-| `PAYPAL_CURRENCY`      | No       | `USD`                                                                              |
+| Variable | Required | Default | Description |
+| -------- | -------- | ------- | ----------- |
+| `APP_ENV` | No | `development` | Deployment environment (`development` or `production`). |
+| `DATABASE_URL` | No | `sqlite:///./data/agentpay_guard.db` | SQLite connection URL (auto-creates `backend/data/` if missing). |
+| `FRONTEND_ORIGIN` | No | `http://localhost:5173` | Allowed CORS origin for backend API. |
+| `FRONTEND_BASE_URL` | No | `http://localhost:5173` | Base URL used to construct PayPal return/cancel redirect URLs. |
+| `PAYPAL_MODE` | **Yes** | `sandbox` | Must be `sandbox`. |
+| `PAYPAL_CLIENT_ID` | **Yes\*** | `""` | PayPal Sandbox REST App Client ID. |
+| `PAYPAL_CLIENT_SECRET`| **Yes\*** | `""` | PayPal Sandbox REST App Client Secret (never exposed to client). |
+| `PAYPAL_BASE_URL` | No | `https://api-m.sandbox.paypal.com` | PayPal Sandbox endpoint URL. |
+| `PAYPAL_CURRENCY` | No | `USD` | ISO-4217 currency code. |
+| `PAYPAL_WEBHOOK_ID` | No | `""` | Webhook ID from PayPal Developer Dashboard for signature verification. |
+| `AI_PROVIDER` | No | `none` | AI provider (`gemini`, `openai`, or `none` for deterministic fallback). |
+| `AI_API_KEY` | No | `""` | Google Gemini or OpenAI API key (backend only). |
+| `AI_MODEL` | No | `gemini-2.5-flash` | LLM model identifier. |
+| `ADMIN_TOKEN` | No\*\* | `""` | Admin secret for policy edits and resets outside development mode. |
 
-*Required for PayPal checkout flow. Without them, the UI shows a clear "PayPal unconfigured" message; all non-payment features still work.
-*`ADMIN_TOKEN` is verified using constant-time `secrets.compare_digest` via the `X-Admin-Token` header. Allowed without a token only when `APP_ENV=development`.
-
----
-
-## Concurrency & Budget Safety
-
-AgentPay Guard provides robust multi-order safety:
-
-- **Budget Reservation:** When `POST /api/payments/create-order` evaluates spending policy, it counts not only settled transactions but also active in-flight orders (`pending`, `approved`, `capturing`, `needs_verification` created within the last 30 minutes via `reserved_cents()`). This prevents concurrent requests from exceeding the total budget.
-- **Daily & Monthly Limit Boundaries:** Spending limits operate strictly on **UTC** calendar boundaries. Daily limits evaluate from `00:00:00 UTC` of the current day, and monthly limits evaluate from `00:00:00 UTC` on day 1 of the current month. Evaluations combine captured spend with active in-flight reservations created within the 30-minute window, ensuring two concurrent orders cannot bypass daily or monthly limits.
-- **Atomic Capture Claim:** In `capture_payment_order()`, the system atomically claims the payment record (`UPDATE payments SET status='capturing' WHERE status IN ('pending', 'approved')`). If another capture attempt is in progress, the second request immediately receives `409 Conflict`.
-- **Pre-Capture Budget Recheck & Atomic Deduction:** The backend verifies that the budget remains sufficient before calling PayPal, and updates `successful_spend_cents` with an atomic SQL expression. On `ORDER_NOT_APPROVED`, the status safely reverts to `pending` so the buyer can complete checkout.
+*\* Required for live PayPal Sandbox checkout; without credentials, non-payment exploration and deterministic fallback remain available.*  
+*\*\* Enforced outside `APP_ENV=development` via `X-Admin-Token` constant-time comparison.*
 
 ---
 
-## Demo Reset & Repeat Runs
+## Conversational Voice Assistant
 
-For hackathon demonstrations, judges, and repeatable testing:
+AgentPay Guard features a built-in voice shopping assistant accessible directly in the browser via the standard Web Speech API:
 
-- **How Reset Demo Works:**
-  - Invoking `POST /api/policy/reset` (or clicking **"Reset to Demo Defaults"** on the Permissions tab) restores the spending guardrails to pristine demo defaults: total budget `$100.00`, per-order cap `$40.00`, unlimited daily and monthly limits ($0), cleared category blocks, human approval required, and agent purchase authority enabled.
-  - The endpoint sets `policies.last_reset_at` to the current UTC timestamp, resets `successful_spend_cents = 0`, and logs a `DEMO_RESET` audit entry.
-- **Non-Destructive History:**
-  - Reset demo **never deletes** records from `payments`, `proposals`, or `audit_events`. Audit trails remain completely immutable and continuous.
-- **Post-Reset Isolation:**
-  - Active metric calculations (`GET /api/summary`), period spending evaluations (`daily_spent_cents`, `monthly_spent_cents`), reserved in-flight queries (`reserved_cents`), and transactions/approvals lists count only payments created **after** `last_reset_at`.
-  - Invariant guarantee: After any capture or reset, `GET /api/summary` `completed_cents` always strictly equals `policy.successful_spend_cents`.
-  - The overview mission control immediately reflects `$0.00` settled spend and `$100.00` available budget, daily limits do not count pre-reset payments, and new purchases proceed normally.
+- **Hands-Free Requesting:** Click the microphone icon to speak purchase requests in natural language (e.g., *"Find a wireless mouse for work under thirty-five dollars"*).
+- **Accent Selection:** Dedicated toggle supporting `en-IN (India)` and `en-US (United States)` recognition and synthesis models.
+- **Spoken Verdicts:** Speaks out authoritative pricing, item name, and explicit rule verdict (`ALLOWED` or `BLOCKED` with reason code).
+- **Safety Boundary:** Voice input is strictly a discovery mechanism. Voice commands **cannot** authorize payments or bypass the human confirmation gate.
 
 ---
 
-## PayPal Sandbox Setup
+## Repository Structure
 
-1. Sign up at [https://developer.paypal.com/](https://developer.paypal.com/)
-2. Go to **Apps & Credentials → Create App** (Sandbox)
-3. Copy **Client ID** and **Client Secret** into `backend/.env`
-4. Use the auto-created sandbox buyer account (or create one under **Sandbox → Accounts**) to approve test payments
-
----
-
-## AI Tools Used
-
-| Tool | Role |
-| ---- | ---- |
-| Google Gemini / OpenAI (optional) | Interprets user's natural-language shopping request and recommends a product **ID** from the backend-supplied catalogue. Fully compatible with Google Gemini free-tier keys (via Google AI Studio) or OpenAI. The model has no authority over price, merchant, policy outcome, or payment status. |
-| Deterministic fallback | Keyword-matching engine that selects a catalogue product when no AI key is configured. Clearly labelled "Demo Fallback Mode" — never misrepresented as an LLM response. |
-
----
-
-## Demo Scenarios
-
-| Scenario                                     | Setup                                                  | Expected Result                                                                                                                                                                                                            |
-| -------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A — Allowed purchase                         | Budget $100, cap $40, approved merchant, product $30   | ALLOWED → user approves → PayPal Sandbox checkout → backend verifies capture                                                                                                                                              |
-| B — Over per-order limit (Smart Alternatives) | Same policy, user requests $79.99 mechanical keyboard | BLOCKED: `MAX_ORDER_AMOUNT_EXCEEDED` → Agent suggests in-policy alternatives (e.g. $29.99 mouse / $34.99 desk lamp) → user can click "Review this instead" and proceed to PayPal checkout                                 |
-| C — Merchant not approved                    | Product $25, unapproved merchant                       | BLOCKED: `MERCHANT_NOT_APPROVED` → In-policy alternatives suggested from approved allowlist                                                                                                                               |
-| D — Budget exhausted                         | $80 spent, $30 product proposed                        | BLOCKED: `TOTAL_BUDGET_EXCEEDED`                                                                                                                                                                                          |
-| E — Payment cancelled                        | User cancels PayPal checkout                           | Status: `cancelled` — budget unchanged                                                                                                                                                                                     |
-
----
-
-## Smart Alternatives
-
-When a user's request results in a **BLOCKED** primary recommendation (such as exceeding the per-order limit or targeting an unapproved seller):
-
-1. **Plain-English Explanation:** The backend generates an easy-to-understand breakdown of why the item violated policy (`block_explanation`).
-2. **Safe Suggestions:** The AI suggests candidate catalogue products, and the deterministic policy engine verifies each candidate against active limits. Up to 2 verified **ALLOWED** alternatives are returned.
-3. **Seamless Transition:** Each alternative is persisted with its own proposal ID. In the UI, users can simply click **"Review this instead →"** to make the alternative their active proposal, unlocking the standard "Approve & Pay" PayPal Sandbox checkout flow.
-4. **Strict Trust Boundary Preserved:** The AI only suggests product IDs and rationales. Prices, merchant allowlists, and policy decisions come strictly from the server-side database and policy engine. Any unknown product ID is discarded.
-
----
-
-## Troubleshooting
-
-### 1. Checking AI Integration Status
-
-To inspect the health and provider status without leaking secrets:
-
-- Open `http://localhost:8000/api/health` in your browser or curl it.
-- Check `ai_status`:
-  - `"ok"`: The configured AI provider is working and communicating properly.
-  - `"not configured"`: No valid key is set or `AI_PROVIDER=none` (the app runs in deterministic fallback mode).
-  - `"error: HTTP 404 (model not found)"`: The configured `AI_MODEL` is not accessible with your API key. Check available models or leave `AI_MODEL` blank to use the recommended default (`gemini-2.5-flash` or `gpt-4o-mini`).
-  - `"error: HTTP 401 (unauthorized)"`: The provided `AI_API_KEY` is invalid or expired.
-
-### 2. Restarting Backend After Editing `.env`
-
-Note that `uvicorn --reload` watches Python source files, **not** `.env`. Whenever you modify `backend/.env`, restart the backend server:
-
-```powershell
-# Stop running uvicorn process (Ctrl+C in terminal), then restart:
-cd backend
-.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
-```
-
-### 3. Freeing Port 8000 on Windows
-
-If you encounter `[WinError 10013]` or `[Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000)`, an existing process may be holding port 8000:
-
-```powershell
-# 1. Find the PID using port 8000
-netstat -ano | findstr :8000
-
-# 2. Stop the process by PID (e.g., if PID is 14240)
-Stop-Process -Id 14240 -Force
-```
-
-If port 8000 is reserved by Windows exclusion ranges, you can also specify a free port:
-
-```powershell
-.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8080
+```text
+agentpay-guard/
+├── backend/
+│   ├── app/                  # FastAPI routers, models, schemas, and services
+│   │   ├── routers/          # agent.py, payments.py, policy.py, health.py
+│   │   └── services/         # ai_service.py, paypal_service.py, policy_engine.py
+│   ├── data/                 # SQLite database storage (agentpay_guard.db)
+│   ├── tests/                # 89 pytest unit and integration test suites
+│   ├── requirements.txt      # Python dependencies
+│   └── .env.example          # Environment variable template
+├── frontend/                 # React 19 + TypeScript + Vite web application
+│   ├── src/components/       # DecisionCard, RequestPanel, PolicyOverview, AuditTimeline
+│   └── src/api/              # Typed backend REST client
+├── docs/                     # Documentation and submission materials
+│   ├── SUBMISSION_MATERIALS.md
+│   ├── TEST_SCENARIOS.md
+│   ├── VOICE_ASSISTANT.md
+│   └── screenshots/          # Application screenshot captures
+├── render.yaml               # Render Cloud deployment blueprint
+├── LICENSE                   # MIT License
+└── README.md                 # Project documentation and architecture guide
 ```
 
 ---
 
-## Deployment Notes
+## Hackathon Evaluation & Scenarios
 
-- Set `APP_ENV=production` when deploying.
-- Configure a strong `ADMIN_TOKEN` in the environment; all policy modification endpoints (`PUT /api/policy` and `POST /api/policy/reset`) enforce `X-Admin-Token` authentication outside development mode.
-- Set `FRONTEND_ORIGIN` to match your deployed web client URL to configure CORS properly.
-- Ensure PayPal credentials and AI API keys are provided only to the server via environment variables and never exposed to client-side bundles.
+To test the deterministic policy engine immediately:
 
----
-
-## Limitations
-
-- Hackathon prototype — not production-grade security.
-- Uses a curated local demo catalogue; does not scrape live stores.
-- PayPal Sandbox only — no real money is ever charged.
-- Single demo policy (no multi-user isolation in MVP).
-- The AI is not a trust boundary; it only suggests product IDs.
-
----
-
-## Product Images
-
-Catalogue products include image URLs mapped to local asset illustrations or hosted static previews. The frontend uses a resilient `ProductImage` component that gracefully falls back to category-themed SVGs with badges if an external image is unavailable or blocked, ensuring a clean and consistent presentation.
-
----
-
-## Screenshots
-
-> *Screenshots from the working application (stored in `docs/screenshots/`)*
-
-| Overview & Mission Control | Spending Guardrails & Permissions |
-| :---: | :---: |
-| ![Overview](docs/screenshots/01_overview.png) | ![Permissions](docs/screenshots/02_permissions.png) |
-| *Mission Control dashboard with live budget, daily spend, and metrics* | *Configurable spending limits and merchant allowlists* |
-
-| Smart Alternatives Proposal | PayPal Sandbox Checkout |
-| :---: | :---: |
-| ![Alternatives](docs/screenshots/03_smart_alternatives.png) | ![PayPal Checkout](docs/screenshots/04_paypal_checkout.png) |
-| *Automated policy block explanation and safe alternatives* | *Verified PayPal Sandbox payment capture and approval* |
-
----
-
-## Hackathon Submission Materials
-
-For the full Devpost submission description, video recording script, screenshot checklist, and evaluation guide, see [SUBMISSION_MATERIALS.md](./SUBMISSION_MATERIALS.md).
-
----
-
-## Licence
-
-MIT — see [LICENSE](./LICENSE).
+1. **Scenario A (Allowed):** *"Find a wireless mouse under $35 from an approved merchant."* → Proposes TechCore Wireless Mouse (\$29.99). Evaluates as `ALLOWED BY POLICY`. Unlocks mandatory approval button for PayPal Sandbox checkout.
+2. **Scenario B (Blocked by Cap):** *"I need a high-end mechanical keyboard."* → Recommends \$79.99 keyboard. Immediately blocked with `MAX_ORDER_AMOUNT_EXCEEDED`. Proposes allowable alternatives within cap.
+3. **Scenario C (Blocked by Merchant):** *"Find a gadget from ShadowTech."* → Blocked with `MERCHANT_NOT_APPROVED` because ShadowTech is not allowlisted.
+4. **Demo Reset:** Click **"Reset Demo"** in Policy Overview to restore the environment to clean starting limits without wiping historical audit records.
