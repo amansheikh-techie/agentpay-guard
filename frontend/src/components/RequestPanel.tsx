@@ -295,50 +295,45 @@ export default function RequestPanel({ onProposalCreated }: Props) {
         {/* Voice Assistant Interactive Bar (only when Web Speech API is supported) */}
         {speechSupported && (
           <div className="voice-toolbar">
-            <div className="voice-status-group">
-              <button
-                type="button"
-                className={`mic-btn ${isListening ? 'listening' : ''}`}
-                onClick={isListening ? handleStopListening : handleStartListening}
-                disabled={loading}
-                title={isListening ? 'Listening... click to stop' : 'Click to speak shopping request'}
-                aria-label={isListening ? 'Stop listening' : 'Start voice input'}
-              >
-                {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-              </button>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="voice-toolbar-top">
+              <div className="voice-status-group">
+                <button
+                  type="button"
+                  className={`mic-btn ${isListening ? 'listening' : ''}`}
+                  onClick={isListening ? handleStopListening : handleStartListening}
+                  disabled={loading}
+                  title={isListening ? 'Listening... click to stop' : 'Click to speak shopping request'}
+                  aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+                >
+                  {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+                </button>
                 <span className="voice-status-text">
                   {isListening ? 'Listening… speak your shopping request now' : 'Voice Assistant Ready'}
                 </span>
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                  {isListening ? 'Say an item and price (e.g. "Find a mouse under $35")' : 'Click microphone to speak or type in the box below'}
-                </span>
+              </div>
+
+              <div className="voice-accent-group">
+                <label htmlFor="voice-lang-select" className="voice-accent-label">
+                  Accent:
+                </label>
+                <select
+                  id="voice-lang-select"
+                  value={speechLang}
+                  onChange={(e) => setSpeechLang(e.target.value as 'en-IN' | 'en-US')}
+                  disabled={isListening || loading}
+                  className="voice-accent-select"
+                  title="Select language accent for speech recognition and spoken verdict"
+                >
+                  <option value="en-IN">en-IN (India)</option>
+                  <option value="en-US">en-US (US)</option>
+                </select>
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: 'auto' }}>
-              <label htmlFor="voice-lang-select" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                Accent:
-              </label>
-              <select
-                id="voice-lang-select"
-                value={speechLang}
-                onChange={(e) => setSpeechLang(e.target.value as 'en-IN' | 'en-US')}
-                disabled={isListening || loading}
-                style={{
-                  fontSize: '0.72rem',
-                  padding: '0.2rem 0.45rem',
-                  background: 'var(--bg-secondary, #1e293b)',
-                  color: 'var(--text-primary, #f8fafc)',
-                  border: '1px solid var(--border-color, #334155)',
-                  borderRadius: 'var(--radius-sm, 4px)',
-                  cursor: isListening || loading ? 'not-allowed' : 'pointer',
-                }}
-                title="Select language accent for speech recognition and spoken verdict"
-              >
-                <option value="en-IN">en-IN (India)</option>
-                <option value="en-US">en-US (US)</option>
-              </select>
+            <div className="voice-status-subtext">
+              {isListening
+                ? 'Say an item and price (e.g. "Find a mouse under $35")'
+                : 'Click microphone to speak or type in the box below'}
             </div>
           </div>
         )}
