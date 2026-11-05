@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./agentpay_guard.db"
     frontend_origin: str = "http://localhost:5173"
+    frontend_base_url: str = "http://localhost:5173"
     admin_token: str = ""
 
     # AI
@@ -66,7 +67,7 @@ class Settings(BaseSettings):
             s = s[len("models/"):]
         return s
 
-    @field_validator("ai_api_key", "ai_base_url", mode="before")
+    @field_validator("ai_api_key", "ai_base_url", "frontend_origin", "frontend_base_url", mode="before")
     @classmethod
     def _clean_ai_text_fields(cls, v: Any) -> str:
         return _clean_str(v)

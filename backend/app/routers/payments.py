@@ -18,6 +18,7 @@ Security Rules:
 """
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -26,6 +27,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import Policy, Product, Proposal, Payment
+
+logger = logging.getLogger(__name__)
 from app.schemas import (
     CreateOrderRequest,
     CreateOrderResponse,
@@ -225,8 +228,10 @@ def create_payment_order(
 
     # 6. Generate payment ID and create PayPal Sandbox order
     payment_id = f"pay_{uuid.uuid4().hex[:12]}"
-    return_url = f"{settings.frontend_origin}?payment_status=approved&payment_id={payment_id}"
-    cancel_url = f"{settings.frontend_origin}?payment_status=cancelled&payment_id={payment_id}"
+    base = settings.frontend_base_url
+    return_url = f"{base.rstrip('/')}/?payment_status=approved&payment_id={payment_id}"
+    cancel_url = f"{base.rstrip('/')}/?payment_status=cancelled&payment_id={payment_id}"
+    logger.info("Created PayPal order with return_url: %s", return_url)
 
     try:
         order_data = paypal_service.create_order(

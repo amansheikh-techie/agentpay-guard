@@ -186,6 +186,7 @@ pytest tests/ -v
 | `APP_ENV`              | No       | `development` (default)                                                            |
 | `DATABASE_URL`         | No       | SQLite path, default `sqlite:///./agentpay_guard.db`                               |
 | `FRONTEND_ORIGIN`      | No       | CORS origin for frontend, default `http://localhost:5173`                          |
+| `FRONTEND_BASE_URL`    | No       | Base URL for PayPal return/cancel redirects, default `http://localhost:5173`       |
 | `ADMIN_TOKEN`          | No*      | Required outside `development` for `PUT /api/policy` and `POST /api/policy/reset`  |
 | `AI_PROVIDER`          | No       | `gemini`, `openai`, or `none` (fallback)                                           |
 | `AI_API_KEY`           | No       | Provider API key (e.g. Gemini free tier or OpenAI) — backend only, never in frontend |

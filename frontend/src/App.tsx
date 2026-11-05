@@ -44,7 +44,14 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [paymentsList, setPaymentsList] = useState<PaymentListItem[]>([]);
 
-  const [activeProposal, setActiveProposal] = useState<Proposal | null>(null);
+  const [activeProposal, setActiveProposal] = useState<Proposal | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('agentpay_active_proposal');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -139,6 +146,11 @@ export default function App() {
   // Handler when a new shopping proposal is created
   const handleProposalCreated = (proposal: Proposal) => {
     setActiveProposal(proposal);
+    try {
+      sessionStorage.setItem('agentpay_active_proposal', JSON.stringify(proposal));
+    } catch {
+      // ignore
+    }
     setActiveTab('shopping');
     loadAudit();
     loadPolicy();
@@ -179,7 +191,12 @@ export default function App() {
       loadPayments();
       loadAudit();
       if (res.approve_url) {
-        window.open(res.approve_url, '_blank');
+        try {
+          sessionStorage.setItem('agentpay_active_proposal', JSON.stringify(activeProposal));
+        } catch {
+          // ignore
+        }
+        window.location.href = res.approve_url;
       }
     } catch (err) {
       console.error('Order creation failed:', err);
@@ -246,6 +263,12 @@ export default function App() {
             onResetDemo={async () => {
               try {
                 const reset = await resetPolicy();
+                setActiveProposal(null);
+                try {
+                  sessionStorage.removeItem('agentpay_active_proposal');
+                } catch {
+                  // ignore
+                }
                 handlePolicyUpdated(reset);
               } catch (err) {
                 console.error('Reset failed:', err);

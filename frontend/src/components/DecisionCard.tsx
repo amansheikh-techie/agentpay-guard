@@ -14,7 +14,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 import type { Proposal } from '../types';
-import { createOrder, captureOrder } from '../api/client';
+import { createOrder, captureOrder, getPayment } from '../api/client';
 
 interface Props {
   proposal: Proposal | null;
@@ -50,26 +50,64 @@ export default function DecisionCard({ proposal: initialProposal, onPaymentSucce
   // return. PayPal redirects back with ?payment_status=approved&payment_id=...
   // after the buyer completes the approval flow.
   useEffect(() => {
-    const checkPayPalReturn = () => {
+    const checkPayPalReturn = async () => {
       const params = new URLSearchParams(window.location.search);
       const paymentStatus = params.get('payment_status');
+      const paymentId = params.get('payment_id');
+      const token = params.get('token');
+
       if (paymentStatus === 'approved') {
         setBuyerApproved(true);
         // Clean up the URL without reload
         const url = new URL(window.location.href);
         url.searchParams.delete('payment_status');
         url.searchParams.delete('payment_id');
-        window.history.replaceState({}, '', url.pathname);
+        url.searchParams.delete('token');
+        url.searchParams.delete('PayerID');
+        window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+
+        // Identify the matching payment's PayPal order ID
+        let paypalOrderId = createdOrder?.paypal_order_id || token;
+        if (!paypalOrderId && paymentId) {
+          try {
+            const payment = await getPayment(paymentId);
+            if (payment?.paypal_order_id) {
+              paypalOrderId = payment.paypal_order_id;
+            }
+          } catch (err) {
+            console.error('Failed to lookup payment details for PayPal return:', err);
+          }
+        }
+
+        if (paypalOrderId) {
+          setCapturing(true);
+          setOrderError(null);
+          try {
+            const result = await captureOrder(paypalOrderId);
+            setCaptureSuccess(`Payment verified and captured successfully! Capture status: ${result.status}`);
+            if (onPaymentSuccess) {
+              onPaymentSuccess();
+            }
+          } catch (err) {
+            setOrderError((err as Error).message || 'Failed to capture PayPal order.');
+          } finally {
+            setCapturing(false);
+          }
+        } else {
+          setOrderError('Could not identify PayPal order ID to capture payment.');
+        }
       }
     };
 
     checkPayPalReturn();
 
     // Also recheck when the window regains focus (buyer returns from PayPal tab)
-    const handleFocus = () => checkPayPalReturn();
+    const handleFocus = () => {
+      checkPayPalReturn();
+    };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, []);
+  }, [createdOrder, onPaymentSuccess]);
 
   if (!proposal) {
     return (
@@ -80,6 +118,21 @@ export default function DecisionCard({ proposal: initialProposal, onPaymentSucce
           </div>
           <h2>Policy Decision &amp; Proposal</h2>
         </div>
+        {captureSuccess && (
+          <div style={{ margin: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem', background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 'var(--radius-md)', color: 'var(--success)', fontSize: '0.8rem' }}>
+            <CheckCircle2 size={16} />
+            <span>{captureSuccess}</span>
+          </div>
+        )}
+        {orderError && (
+          <div style={{ margin: '1rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.625rem', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 'var(--radius-md)', color: 'var(--danger)', fontSize: '0.78rem' }}>
+            <AlertCircle size={15} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>
+              <div style={{ fontWeight: 600 }}>Checkout Notice:</div>
+              <div>{orderError}</div>
+            </div>
+          </div>
+        )}
         <div className="decision-empty" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
           <div className="decision-empty-icon" style={{ fontSize: '3rem', marginBottom: '0.5rem', opacity: 0.85 }}>🛡️</div>
           <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>

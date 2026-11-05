@@ -90,6 +90,11 @@ export const fetchPaymentsList = (status?: string): Promise<PaymentListItem[]> =
   return request<PaymentListItem[]>(`/payments${query}`);
 };
 
+export const getPayment = (paymentId: string) =>
+  request<{ id: string; proposal_id: string; paypal_order_id: string; status: string }>(
+    `/payments/${paymentId}`
+  );
+
 export const createOrder = (proposalId: string, approvalBinding?: Record<string, unknown>) =>
   request<{ payment_id: string; paypal_order_id: string; approve_url: string; status: string }>(
     '/payments/create-order',

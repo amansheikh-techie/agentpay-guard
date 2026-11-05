@@ -98,6 +98,55 @@ def test_create_order_successful_flow(client, allowed_proposal):
         assert kwargs["amount_cents"] == 2999
         assert kwargs["currency"] == "USD"
 
+        # Verify return_url and cancel_url use frontend_base_url and contain /?payment_status=
+        from app.config import get_settings
+        settings = get_settings()
+        expected_base = settings.frontend_base_url.rstrip("/")
+        assert kwargs["return_url"].startswith(expected_base)
+        assert "/?payment_status=approved&payment_id=" in kwargs["return_url"]
+        assert kwargs["cancel_url"].startswith(expected_base)
+        assert "/?payment_status=cancelled&payment_id=" in kwargs["cancel_url"]
+
+
+def test_create_order_uses_frontend_base_url_for_redirects(client, allowed_proposal, monkeypatch):
+    """
+    Assert that return_url and cancel_url explicitly use frontend_base_url
+    (distinct from frontend_origin), contain '/?payment_status=', and cleanly strip trailing slashes.
+    """
+    from app import config
+    settings = config.get_settings()
+    monkeypatch.setattr(settings, "frontend_origin", "http://localhost:5173")
+    monkeypatch.setattr(settings, "frontend_base_url", "https://deployed-app.example.com/")
+
+    fake_order = {
+        "id": "PAYPAL-ORDER-BASE-URL-TEST",
+        "status": "CREATED",
+        "links": [
+            {"href": "https://www.sandbox.paypal.com/checkoutnow?token=PAYPAL-ORDER-BASE-URL-TEST", "rel": "approve"}
+        ],
+    }
+
+    with patch("app.config.Settings.paypal_configured", True), \
+         patch("app.services.paypal_service.create_order", return_value=fake_order) as mock_create:
+
+        res = client.post("/api/payments/create-order", json={
+            "proposal_id": allowed_proposal["id"],
+            "user_approved": True,
+        })
+
+        assert res.status_code == 201
+        kwargs = mock_create.call_args.kwargs
+        return_url = kwargs["return_url"]
+        cancel_url = kwargs["cancel_url"]
+
+        # Uses frontend_base_url, NOT frontend_origin
+        assert return_url.startswith("https://deployed-app.example.com/?payment_status=approved&payment_id=")
+        assert "/?payment_status=approved&payment_id=" in return_url
+        assert cancel_url.startswith("https://deployed-app.example.com/?payment_status=cancelled&payment_id=")
+        assert "/?payment_status=cancelled&payment_id=" in cancel_url
+        # Confirms no trailing slash double-slash before query string
+        assert "https://deployed-app.example.com//?" not in return_url
+
 
 def test_capture_order_verified_updates_budget_once(client, allowed_proposal):
     """Verified capture updates payment status and increments budget spend."""

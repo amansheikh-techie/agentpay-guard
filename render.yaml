@@ -16,4 +16,7 @@ services:
         value: sandbox
       - key: FRONTEND_ORIGIN
         value: "https://agentpay-guard-zcet.onrender.com"
+      # TODO: Set FRONTEND_BASE_URL to your real deployed URL for PayPal return/cancel redirects; do not guess it.
+      - key: FRONTEND_BASE_URL
+        value: "https://agentpay-guard-zcet.onrender.com"
 
