@@ -54,7 +54,8 @@ export default function RequestPanel({ onProposalCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   // Voice Assistant states
-  const [speechSupported, setSpeechSupported] = useState(false);
+  const speechSupported = !!getSpeechRecognitionClass();
+  const [speechLang, setSpeechLang] = useState<'en-IN' | 'en-US'>('en-IN');
   const [isListening, setIsListening] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState('');
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -62,11 +63,6 @@ export default function RequestPanel({ onProposalCreated }: Props) {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const recognitionRef = useRef<any>(null);
-
-  useEffect(() => {
-    const SpeechClass = getSpeechRecognitionClass();
-    setSpeechSupported(!!SpeechClass);
-  }, []);
 
   // Cleanup speech synthesis on unmount
   useEffect(() => {
@@ -94,13 +90,15 @@ export default function RequestPanel({ onProposalCreated }: Props) {
     const utterance = new SpeechSynthesisUtterance(text);
     const voices = window.speechSynthesis.getVoices();
 
-    // Prefer Indian English or US English voices
+    // Prefer selected English accent (en-IN or en-US)
     const preferredVoice =
-      voices.find((v) => v.lang === 'en-IN') ||
-      voices.find((v) => v.lang === 'en_IN') ||
-      voices.find((v) => v.lang.startsWith('en-US')) ||
-      voices.find((v) => v.lang.startsWith('en')) ||
-      null;
+      speechLang === 'en-IN'
+        ? voices.find((v) => v.lang === 'en-IN' || v.lang === 'en_IN') ||
+          voices.find((v) => v.lang.startsWith('en')) ||
+          null
+        : voices.find((v) => v.lang.startsWith('en-US')) ||
+          voices.find((v) => v.lang.startsWith('en')) ||
+          null;
 
     if (preferredVoice) {
       utterance.voice = preferredVoice;
@@ -168,7 +166,7 @@ export default function RequestPanel({ onProposalCreated }: Props) {
       const recognition = new (SpeechClass as any)();
       recognition.continuous = false;
       recognition.interimResults = true;
-      recognition.lang = 'en-US';
+      recognition.lang = speechLang;
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -316,6 +314,31 @@ export default function RequestPanel({ onProposalCreated }: Props) {
                   {isListening ? 'Say an item and price (e.g. "Find a mouse under $35")' : 'Click microphone to speak or type in the box below'}
                 </span>
               </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: 'auto' }}>
+              <label htmlFor="voice-lang-select" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                Accent:
+              </label>
+              <select
+                id="voice-lang-select"
+                value={speechLang}
+                onChange={(e) => setSpeechLang(e.target.value as 'en-IN' | 'en-US')}
+                disabled={isListening || loading}
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '0.2rem 0.45rem',
+                  background: 'var(--bg-secondary, #1e293b)',
+                  color: 'var(--text-primary, #f8fafc)',
+                  border: '1px solid var(--border-color, #334155)',
+                  borderRadius: 'var(--radius-sm, 4px)',
+                  cursor: isListening || loading ? 'not-allowed' : 'pointer',
+                }}
+                title="Select language accent for speech recognition and spoken verdict"
+              >
+                <option value="en-IN">en-IN (India)</option>
+                <option value="en-US">en-US (US)</option>
+              </select>
             </div>
           </div>
         )}

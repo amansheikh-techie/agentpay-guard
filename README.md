@@ -2,6 +2,11 @@
 
 > **Hackathon Prototype** — PayPal Sandbox only. No real money. Not a production financial product.
 
+Deterministic spending guardrails, human-in-the-loop approvals, and conversational voice assistance for autonomous AI commerce.
+
+- **Live Demo:** [https://agentpay-guard.onrender.com](https://agentpay-guard.onrender.com) *(Placeholder)*
+- **Demo Video:** [Watch Demo Video (AgentPay_Guard_demo_final.mp4)](https://github.com/amansheikh-techie/agentpay-guard/releases/tag/v1.0.0) *(Placeholder)*
+
 A safety layer for AI-assisted commerce built for the **PayPal AI Hackathon 2026**.
 
 A user defines spending limits and approved merchants. An AI agent proposes a product from a controlled catalogue. A **deterministic backend policy engine** checks the proposal independently of the AI. The user must explicitly approve any eligible purchase before PayPal Sandbox checkout. The backend verifies the payment capture before recording a successful transaction.

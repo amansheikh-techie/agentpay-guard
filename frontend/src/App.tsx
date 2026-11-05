@@ -111,11 +111,16 @@ export default function App() {
 
   // Initial load
   useEffect(() => {
-    loadPolicy();
-    loadSummary();
-    loadPayments();
-    loadProducts();
-    loadAudit();
+    const init = async () => {
+      await Promise.all([
+        loadPolicy(),
+        loadSummary(),
+        loadPayments(),
+        loadProducts(),
+        loadAudit(),
+      ]);
+    };
+    init();
   }, [loadPolicy, loadSummary, loadPayments, loadProducts, loadAudit]);
 
   const handleTabChange = (tab: TabKey) => {
