@@ -1126,6 +1126,122 @@ def test_404_logs_sanitized_reason_and_falls_back(caplog):
             assert "[REDACTED_KEY]" in caplog.text
 
 
+def test_ai_retry_two_503s_then_success():
+    """
+    Simulate two HTTP 503 errors followed by a 200 OK.
+    Verifies that the AI client retries twice with ~1s backoff and succeeds in live mode.
+    """
+    from app.config import Settings
+    from app.services.ai_service import generate_recommendation
+    import json
+    from unittest.mock import MagicMock, patch
+
+    settings = Settings(
+        ai_provider="gemini",
+        ai_api_key="test-key",
+    )
+
+    catalogue = [
+        {
+            "id": "tc-wireless-mouse",
+            "name": "TechCore Wireless Mouse",
+            "description": "Ergonomic mouse",
+            "price_cents": 2999,
+            "currency": "USD",
+            "merchant_id": "techcore",
+            "merchant_name": "TechCore",
+            "features": ["wireless"],
+        },
+    ]
+
+    resp_503_1 = MagicMock()
+    resp_503_1.status_code = 503
+
+    resp_503_2 = MagicMock()
+    resp_503_2.status_code = 503
+
+    resp_200 = MagicMock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps({
+                        "product_id": "tc-wireless-mouse",
+                        "rationale": "High quality wireless mouse",
+                        "matched_requirements": ["wireless"],
+                        "unmet_requirements": [],
+                        "confidence_note": "Recovered after retries",
+                        "candidates": [{"product_id": "tc-wireless-mouse", "reason": "Best match"}]
+                    })
+                }
+            }
+        ]
+    }
+
+    with patch("app.services.ai_service.get_settings", return_value=settings), \
+         patch("time.sleep") as mock_sleep, \
+         patch("httpx.Client.post", side_effect=[resp_503_1, resp_503_2, resp_200]) as mock_post:
+        result = generate_recommendation("Buy a mouse", catalogue)
+
+        assert mock_post.call_count == 3
+        assert mock_sleep.call_count == 2
+        assert mock_sleep.call_args_list[0][0][0] == 1.0
+        assert mock_sleep.call_args_list[1][0][0] == 1.0
+        assert result.ai_mode == "live"
+        assert result.recommendation.product_id == "tc-wireless-mouse"
+        assert result.recommendation.rationale == "High quality wireless mouse"
+
+
+def test_ai_retry_three_503s_still_produces_fallback():
+    """
+    Simulate three consecutive HTTP 503 errors (initial attempt + 2 retries).
+    Verifies retries are exhausted and it falls back cleanly to the deterministic path
+    with the expected fallback rationale format and status code.
+    """
+    from app.config import Settings
+    from app.services.ai_service import generate_recommendation
+    from unittest.mock import MagicMock, patch
+
+    settings = Settings(
+        ai_provider="gemini",
+        ai_api_key="test-key",
+    )
+
+    catalogue = [
+        {
+            "id": "tc-wireless-mouse",
+            "name": "TechCore Wireless Mouse",
+            "description": "Ergonomic mouse",
+            "price_cents": 2999,
+            "currency": "USD",
+            "merchant_id": "techcore",
+            "merchant_name": "TechCore",
+            "features": ["wireless"],
+        },
+    ]
+
+    resp_503_1 = MagicMock()
+    resp_503_1.status_code = 503
+
+    resp_503_2 = MagicMock()
+    resp_503_2.status_code = 503
+
+    resp_503_3 = MagicMock()
+    resp_503_3.status_code = 503
+
+    with patch("app.services.ai_service.get_settings", return_value=settings), \
+         patch("time.sleep") as mock_sleep, \
+         patch("httpx.Client.post", side_effect=[resp_503_1, resp_503_2, resp_503_3]) as mock_post:
+        result = generate_recommendation("Buy a mouse", catalogue)
+
+        assert mock_post.call_count == 3
+        assert mock_sleep.call_count == 2
+        assert result.ai_mode == "fallback"
+        assert result.recommendation.product_id == "tc-wireless-mouse"
+        assert "[Fallback: AI provider call failed (503)]" in result.recommendation.rationale
+
+
 def test_health_ai_status_reporting(client):
     """Verify /api/health reports ai_status values: 'not configured', 'ok', and sanitized error strings."""
     from app.config import Settings

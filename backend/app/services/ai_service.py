@@ -15,13 +15,20 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any, Optional
 from urllib.parse import urlparse
+import httpx
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Retry and timeout parameters for external AI provider calls
+MAX_AI_RETRIES: int = 2
+AI_RETRY_BACKOFF_SECONDS: float = 1.0
+AI_TOTAL_TIMEOUT_SECONDS: float = 10.0
 
 # Module-level tracking for /api/health ai_status
 _last_ai_status: str = "ok"
@@ -222,20 +229,92 @@ def _post_chat_completion(
     chat_url: str,
     headers: dict[str, str],
     payload: dict[str, Any],
+    max_retries: int = MAX_AI_RETRIES,
+    backoff_seconds: float = AI_RETRY_BACKOFF_SECONDS,
+    total_timeout: float = AI_TOTAL_TIMEOUT_SECONDS,
 ) -> Any:
     """
-    Post chat completion to an OpenAI-compatible endpoint.
-    If the endpoint rejects response_format (e.g. HTTP 400 Bad Request),
-    automatically retries once without response_format and falls back to strict prompt instructions.
+    Post chat completion to an OpenAI-compatible endpoint with retry and timeout guards:
+    - Retries up to `max_retries` times on HTTP 429 and 5xx with `backoff_seconds` delay.
+    - Enforces `total_timeout` limit before retrying.
+    - If endpoint rejects response_format (HTTP 400), automatically retries once without it.
     """
-    resp = client.post(chat_url, headers=headers, json=payload)
-    if resp.status_code == 400 and "response_format" in payload:
-        logger.warning("Endpoint rejected response_format (HTTP 400); retrying once without response_format.")
-        fallback_payload = dict(payload)
-        fallback_payload.pop("response_format", None)
-        resp = client.post(chat_url, headers=headers, json=fallback_payload)
-    resp.raise_for_status()
-    return resp
+    start_time = time.monotonic()
+    curr_payload = payload
+    last_resp = None
+
+    for attempt in range(max_retries + 1):
+        elapsed = time.monotonic() - start_time
+        if elapsed >= total_timeout:
+            logger.warning("AI provider total timeout of %.1fs exceeded before attempt %d.", total_timeout, attempt + 1)
+            raise httpx.TimeoutException(f"AI provider total timeout of {total_timeout}s exceeded.")
+
+        try:
+            resp = client.post(chat_url, headers=headers, json=curr_payload)
+        except httpx.HTTPStatusError as err:
+            if err.response is not None and (err.response.status_code == 429 or 500 <= err.response.status_code <= 599):
+                resp = err.response
+            else:
+                raise
+
+        last_resp = resp
+
+        # Special handling: endpoint rejected response_format (HTTP 400 Bad Request)
+        if resp.status_code == 400 and "response_format" in curr_payload:
+            logger.warning("Endpoint rejected response_format (HTTP 400); retrying once without response_format.")
+            curr_payload = dict(curr_payload)
+            curr_payload.pop("response_format", None)
+            try:
+                resp = client.post(chat_url, headers=headers, json=curr_payload)
+            except httpx.HTTPStatusError as err:
+                if err.response is not None and (err.response.status_code == 429 or 500 <= err.response.status_code <= 599):
+                    resp = err.response
+                else:
+                    raise
+            last_resp = resp
+
+        # Check for transient errors: HTTP 429 and 5xx (500-599)
+        if resp.status_code == 429 or (500 <= resp.status_code <= 599):
+            if attempt < max_retries:
+                elapsed = time.monotonic() - start_time
+                if elapsed + backoff_seconds < total_timeout:
+                    logger.warning(
+                        "AI provider returned HTTP %d; retrying in %.1fs (attempt %d of %d)...",
+                        resp.status_code,
+                        backoff_seconds,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    time.sleep(backoff_seconds)
+                    continue
+                else:
+                    logger.warning(
+                        "AI provider returned HTTP %d but remaining time (%.1fs) is less than backoff (%.1fs); stopping retries.",
+                        resp.status_code,
+                        total_timeout - elapsed,
+                        backoff_seconds,
+                    )
+
+        # For non-retryable responses or when retries are exhausted:
+        resp.raise_for_status()
+        if resp.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"HTTP {resp.status_code}",
+                request=getattr(resp, "request", None),
+                response=resp,
+            )
+        return resp
+
+    if last_resp is not None:
+        last_resp.raise_for_status()
+        if last_resp.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"HTTP {last_resp.status_code}",
+                request=getattr(last_resp, "request", None),
+                response=last_resp,
+            )
+        return last_resp
+    raise httpx.TimeoutException("AI provider call failed with no response.")
 
 
 def _call_openai(user_request: str, catalogue: list[dict[str, Any]], settings: Any) -> AIRecommendation:
@@ -297,7 +376,7 @@ def _call_openai(user_request: str, catalogue: list[dict[str, Any]], settings: A
     if settings.ai_provider.lower() != "gemini":
         payload["temperature"] = 0.2
 
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=AI_TOTAL_TIMEOUT_SECONDS) as client:
         resp = _post_chat_completion(client, chat_url, headers, payload)
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
@@ -490,7 +569,7 @@ def extract_requirements_from_ai(
         if settings.ai_provider.lower() != "gemini":
             payload["temperature"] = 0.0
 
-        with httpx.Client(timeout=20.0) as client:
+        with httpx.Client(timeout=AI_TOTAL_TIMEOUT_SECONDS) as client:
             resp = _post_chat_completion(client, chat_url, headers, payload)
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
