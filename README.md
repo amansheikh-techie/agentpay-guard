@@ -4,7 +4,7 @@
 
 Deterministic spending guardrails, human-in-the-loop approvals, and conversational voice assistance for autonomous AI commerce.
 
-- **Live Demo:** [https://agentpay-guard.onrender.com](https://agentpay-guard.onrender.com) *(Placeholder)*
+- **Live Demo:** [https://agentpay-guard-zcet.onrender.com](https://agentpay-guard-zcet.onrender.com)
 - **Demo Video:** [Watch Demo Video (AgentPay_Guard_demo_final.mp4)](https://github.com/amansheikh-techie/agentpay-guard/releases/tag/v1.0.0) *(Placeholder)*
 
 A safety layer for AI-assisted commerce built for the **PayPal AI Hackathon 2026**.
