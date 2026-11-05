@@ -15,5 +15,5 @@ services:
       - key: PAYPAL_MODE
         value: sandbox
       - key: FRONTEND_ORIGIN
-        value: "*"
+        value: "https://agentpay-guard-zcet.onrender.com"
 
