@@ -15,10 +15,17 @@ Autonomous AI Commerce Spending Guardrails, Human-in-the-Loop Approvals, and Ver
 ## Live Demo
 
 - **Application URL:** [https://agentpay-guard-zcet.onrender.com](https://agentpay-guard-zcet.onrender.com)
-- **Demo Video:** [https://youtu.be/agZltmxm3o0](https://youtu.be/agZltmxm3o0)
 - **Deployment Platform:** Render (Web Service running FastAPI + React static bundle)
 
 *Note: The demo runs on Render free tier infrastructure. If the service is idle, initial startup may take approximately 30 to 60 seconds.*
+
+---
+
+## Demo Video
+
+- **Video Walkthrough:** [https://youtu.be/SYj5fbhFur8](https://youtu.be/SYj5fbhFur8)
+
+AgentPay Guard: policy-enforced payments for AI shopping agents (PayPal AI Hackathon 2026). Video is under 3 minutes.
 
 ---
 

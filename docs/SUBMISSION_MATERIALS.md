@@ -3,6 +3,7 @@
 > **Project Name:** AgentPay Guard  
 > **Tagline:** A deterministic safety layer for AI shopping agents with human-in-the-loop PayPal Sandbox checkout.  
 > **Built for:** PayPal AI Hackathon 2026  
+> **Demo Video:** [https://youtu.be/SYj5fbhFur8](https://youtu.be/SYj5fbhFur8)  
 > **Repository:** [https://github.com/amansheikh-techie/agentpay-guard](https://github.com/amansheikh-techie/agentpay-guard)
 
 ---
@@ -104,6 +105,7 @@ The PayPal developer platform is the core transaction engine of AgentPay Guard:
 
 ## 3. Scripted 2-Minute-40-Second Video Walkthrough
 
+**Watch the Video:** [https://youtu.be/SYj5fbhFur8](https://youtu.be/SYj5fbhFur8)  
 **Target Total Duration:** 2 minutes, 40 seconds (well under the 3:00 Devpost limit).
 
 | Timestamp       | Screen Action                                                                                                                       | Voiceover Narration                                                                                                                                                                                                                                                                                                         |
