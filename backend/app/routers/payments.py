@@ -19,6 +19,7 @@ Security Rules:
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
+from typing import Optional
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func

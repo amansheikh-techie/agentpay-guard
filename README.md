@@ -41,7 +41,7 @@ Autonomous AI purchasing agents are evolving rapidly from passive search assista
 
 ## The Solution
 
-**AgentPay Guard** is an authoritative proxy and deterministic enforcement firewall positioned between generative AI shopping agents and the PayPal Developer Platform. 
+**AgentPay Guard** is an authoritative proxy and deterministic enforcement firewall positioned between generative AI shopping agents and the PayPal Developer Platform.
 
 ### Core Architectural Principle
 
@@ -58,30 +58,37 @@ Autonomous AI purchasing agents are evolving rapidly from passive search assista
 ## Application Screenshots
 
 ### 1. Mission Control Dashboard
+
 ![Mission Control Dashboard](docs/screenshots/01-dashboard.png)
 *Real-time spend visualization showing budget limits ($100.00 total, $40.00 per-purchase cap), remaining balance, active policy guardrails, and approved merchant registry.*
 
 ### 2. Conversational Voice Assistant
+
 ![Conversational Voice Assistant](docs/screenshots/07-voice-assistant.png)
 *Browser-native Web Speech API interface enabling hands-free shopping discovery with real-time transcription and accent selection (`en-IN` India and `en-US` United States).*
 
 ### 3. AI Shopping Proposal Evaluated Within Policy
+
 ![AI Shopping Proposal Allowed](docs/screenshots/02-agent-request.png)
 *Natural-language request evaluated by the deterministic engine: TechCore Wireless Mouse ($29.99) passes all limits and unlocks the explicit human approval checkout button.*
 
 ### 4. Verified PayPal Sandbox Order Creation
+
 ![PayPal Sandbox Order Created](docs/screenshots/03-approved-purchase.png)
 *Explicit human authorization creates a PayPal Orders v2 Sandbox order with an approval binding token, ready for secure buyer checkout.*
 
 ### 5. Policy Enforcement: Blocked for Exceeding Per-Purchase Cap
+
 ![Blocked Over Limit](docs/screenshots/04-blocked-over-limit.png)
 *Mechanical Gaming Keyboard ($79.99) blocked for exceeding the $40.00 limit, automatically surfacing in-policy Smart Alternatives ($39.99).*
 
 ### 6. Policy Enforcement: Blocked for Unauthorized Merchant
+
 ![Blocked Unauthorized Merchant](docs/screenshots/05-blocked-merchant.png)
 *ShadowTech gadget purchase blocked with `MERCHANT_NOT_APPROVED`, preventing the agent from transacting outside the approved merchant allowlist.*
 
 ### 7. Immutable Cryptographic Audit Trail
+
 ![Immutable Audit Trail](docs/screenshots/06-audit-trail.png)
 *Tamper-evident audit log recording every proposal, policy evaluation, order creation, and capture event with chronological timestamps and SHA-256 integrity hashes.*
 
