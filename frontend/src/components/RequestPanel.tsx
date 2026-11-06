@@ -87,7 +87,14 @@ export default function RequestPanel({ onProposalCreated }: Props) {
     }
     window.speechSynthesis.cancel();
 
-    const utterance = new SpeechSynthesisUtterance(text);
+    // Clean text for speech synthesis: replace underscores with spaces so TTS reads natural words instead of pronouncing "underscore"
+    const speechText = text
+      .replace(/_+/g, ' ')
+      .replace(/[`*~#]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const utterance = new SpeechSynthesisUtterance(speechText);
     const voices = window.speechSynthesis.getVoices();
 
     // Prefer selected English accent (en-IN or en-US)
